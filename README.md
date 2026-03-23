@@ -694,3 +694,117 @@ Invoke-RestMethod `
     -Uri "http://localhost:8000/api/v1/requests" `
     -Headers @{ Authorization = "Bearer $token" }
 ```
+
+## Attendance Module
+
+The attendance module receives external pointage scans, stores lightweight raw traceability events, maintains one daily summary per employee and date, and generates monthly reports from those daily summaries.
+
+- The external pointage application sends scans to the backend through `POST /api/v1/attendance/scans`.
+- The first version supports two reader types: `IN` and `OUT`.
+- Employees are resolved explicitly by `matricule`.
+- The attendance date follows the source-local date carried by `scanned_at`, while stored timestamps are normalized to UTC.
+- Raw scan events are short-term traceability records and stay intentionally lightweight.
+- Daily summaries are the main attendance source for ongoing usage.
+- Monthly reports are generated from daily summaries and are stored for reporting convenience.
+- `attendance.ingest` protects scan ingestion.
+- `attendance.read` protects attendance read endpoints.
+- `attendance.reports.generate` protects monthly report generation.
+- For one employee and one date, the earliest `IN` becomes `first_check_in_at`.
+- For one employee and one date, the latest `OUT` becomes `last_check_out_at`.
+- `worked_duration_minutes` is computed as the difference between `first_check_in_at` and `last_check_out_at` when both are present and coherent.
+- Day statuses are kept simple in this version:
+  - `present`: both check-in and check-out exist and produce a valid duration
+  - `incomplete`: only one side exists or the pair is incoherent
+  - `absent`: reserved for future manual or automated population
+  - `leave`: reserved for future leave-aware synchronization
+- Monthly report totals are aggregated only from existing daily summaries in this version. Because there is no shift engine or leave automation yet, `total_absence_days` and `total_leave_days` stay `0` unless corresponding daily summaries already exist.
+- Raw scan retention cleanup is not scheduled yet, but the raw events table is designed for future cleanup using `scanned_at` and `created_at`.
+
+Send an `IN` scan event:
+
+```powershell
+$token = "paste-ingestion-access-token-here"
+$body = @{
+    matricule = "EMP-0001"
+    reader_type = "IN"
+    scanned_at = "2026-03-24T08:02:00Z"
+    source = "nfc-reader-in"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/scans" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Send an `OUT` scan event:
+
+```powershell
+$token = "paste-ingestion-access-token-here"
+$body = @{
+    matricule = "EMP-0001"
+    reader_type = "OUT"
+    scanned_at = "2026-03-24T17:31:00Z"
+    source = "nfc-reader-out"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/scans" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+List daily attendance summaries:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/attendance/daily-summaries?date_from=2026-03-01&date_to=2026-03-31&status=present" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Get one employee's daily attendance entries:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/attendance/employees/1/daily-summaries?date_from=2026-03-01&date_to=2026-03-31" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Generate monthly attendance reports:
+
+```powershell
+$token = "paste-access-token-here"
+$body = @{
+    report_year = 2026
+    report_month = 3
+    include_inactive = $false
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/monthly-reports/generate" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+List monthly attendance reports:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/attendance/monthly-reports?year=2026&month=3" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
