@@ -808,3 +808,112 @@ Invoke-RestMethod `
     -Uri "http://localhost:8000/api/v1/attendance/monthly-reports?year=2026&month=3" `
     -Headers @{ Authorization = "Bearer $token" }
 ```
+
+## Performance Module
+
+The performance module provides simple team-based daily performance tracking.
+
+- Performance is team-based only in this version.
+- Objectives are configured per team.
+- Each team should have one active objective at a time.
+- Team leaders submit one achieved value per team and per day.
+- One daily performance record is allowed per team and date.
+- Daily performance snapshots copy the active objective value into the stored record.
+- `performance_percentage` is stored on a `0-100` scale.
+  - Example: `85.0` means 85 percent.
+  - Values above `100.0` are allowed when the achieved value exceeds the objective.
+- Objective management is admin-oriented and protected by `performance.manage`.
+- Performance read endpoints require authentication.
+  - Super admin and users with `performance.read` or `performance.manage` can read all teams.
+  - Other authenticated users can read only the teams they lead.
+- Daily performance submission requires an authenticated user who is either:
+  - the configured team leader
+  - or the super admin
+
+Create a team objective:
+
+```powershell
+$token = "paste-admin-access-token-here"
+$body = @{
+    team_id = 1
+    objective_value = 120
+    objective_type = "tickets"
+    is_active = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/performance/objectives" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Update a team objective:
+
+```powershell
+$token = "paste-admin-access-token-here"
+$body = @{
+    objective_value = 140
+    objective_type = "tickets"
+    is_active = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Patch `
+    -Uri "http://localhost:8000/api/v1/performance/objectives/1" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Submit daily performance:
+
+```powershell
+$token = "paste-team-leader-access-token-here"
+$body = @{
+    team_id = 1
+    performance_date = "2026-03-24"
+    achieved_value = 102
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/performance/daily-performances" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+List performance by team:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/performance/daily-performances?team_id=1" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Query performance by date range:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/performance/daily-performances?date_from=2026-03-01&date_to=2026-03-31" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Get daily performance for one team and day:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/performance/teams/1/daily-performances/2026-03-24" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
