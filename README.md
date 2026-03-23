@@ -38,6 +38,7 @@ Open the application after startup:
 - ReDoc: `http://localhost:8000/redoc`
 - Health endpoint: `http://localhost:8000/health`
 - Setup status endpoint: `http://localhost:8000/api/v1/setup/status`
+- Internal admin dashboard login: `http://localhost:8000/admin/login`
 
 ## Run With Docker And PostgreSQL
 
@@ -916,4 +917,115 @@ Invoke-RestMethod `
     -Method Get `
     -Uri "http://localhost:8000/api/v1/performance/teams/1/daily-performances/2026-03-24" `
     -Headers @{ Authorization = "Bearer $token" }
+```
+
+## Dashboard Module
+
+The dashboard module is a read-only aggregation layer on top of the existing employees, requests, attendance, and performance modules.
+
+- It does not create or modify business data.
+- It exposes frontend-friendly summary endpoints for overview pages, widgets, and chart data.
+- It supports practical filters such as `date`, `date_from`, `date_to`, `team_id`, and `department_id` where relevant.
+- All dashboard endpoints require an authenticated user.
+- Super admin always gets full dashboard scope.
+- Users with `dashboard.read` or `dashboard.manage` also get full dashboard scope.
+- Other authenticated users receive a limited scope:
+  - requests: their own requests, requests they currently need to approve, and requests from teams they lead
+  - attendance and employees: their own employee scope and teams they lead
+  - performance: only teams they lead
+
+Fetch the global dashboard overview:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/dashboard/overview?date=2026-03-24" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Fetch the requests dashboard summary:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/dashboard/requests-summary?date_from=2026-03-01&date_to=2026-03-31&recent_limit=5" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Fetch the attendance dashboard summary:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/dashboard/attendance-summary?date=2026-03-24&date_from=2026-03-18&date_to=2026-03-24" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Fetch the performance dashboard summary:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/dashboard/performance-summary?date=2026-03-24" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+## Internal Admin Dashboard
+
+The internal admin dashboard is a server-rendered control panel for the technical super admin only.
+
+- It is not public-facing.
+- It is not a raw database browser.
+- It manages business data through safe application-level forms and read-only inspection pages.
+- It uses a dedicated cookie-based admin session on top of the existing authentication accounts.
+- Only active `is_super_admin=true` accounts can sign in.
+
+Main access points:
+
+- Login page: `http://localhost:8000/admin/login`
+- Dashboard home: `http://localhost:8000/admin`
+
+How login works:
+
+- Initialize the system first through the setup module if no super admin exists yet.
+- Sign in on `/admin/login` with the existing super admin matricule and password.
+- The admin dashboard stores a signed HttpOnly cookie scoped to `/admin`.
+- The public API keeps using bearer tokens and is not replaced by the admin session.
+
+Main admin sections:
+
+- Users
+- Employees
+- Departments
+- Teams
+- Job Titles
+- Permissions
+- Request Types
+- Request Fields
+- Request Steps
+- Requests
+- Attendance Daily Summaries
+- Attendance Monthly Reports
+- Performance Objectives
+- Performance Records
+
+Practical usage notes:
+
+- Employee creation from the admin UI returns the generated temporary password once on the response page.
+- Request pages are inspection-focused and expose submitted values, current workflow step, workflow progress, and action history.
+- Attendance pages are inspection-focused and allow monthly report generation.
+- Performance pages allow objective management and daily record submission.
+
+Open the admin dashboard after the API is running:
+
+```powershell
+Start-Process "http://localhost:8000/admin/login"
 ```

@@ -1,0 +1,137 @@
+{% extends "admin/base.html" %}
+{% from "admin/partials/table.html" import render_table %}
+{% block content %}
+<div class="row g-4 mb-4">
+    <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm border-0 admin-stat">
+            <div class="card-body">
+                <div class="text-muted small">Employees</div>
+                <div class="display-6">{{ overview_data.overview.total_employees }}</div>
+                <div class="small text-muted">{{ overview_data.overview.active_employees }} active</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm border-0 admin-stat">
+            <div class="card-body">
+                <div class="text-muted small">Departments / Teams</div>
+                <div class="display-6">{{ overview_data.overview.total_departments }}</div>
+                <div class="small text-muted">{{ overview_data.overview.total_teams }} teams</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm border-0 admin-stat">
+            <div class="card-body">
+                <div class="text-muted small">Job Titles</div>
+                <div class="display-6">{{ overview_data.job_titles_count }}</div>
+                <div class="small text-muted">Catalog entries</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm border-0 admin-stat">
+            <div class="card-body">
+                <div class="text-muted small">Today Attendance</div>
+                <div class="display-6">{{ overview_data.overview.attendance_summary.present_count }}</div>
+                <div class="small text-muted">{{ overview_data.overview.attendance_summary.absent_count }} absent</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-12 col-xl-6">
+        <div class="card shadow-sm border-0 admin-card mb-4">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Workflow Snapshot</h2>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-3">
+                    <div class="col-4">
+                        <div class="overview-number">{{ overview_data.overview.pending_requests_count }}</div>
+                        <div class="small text-muted">Pending</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="overview-number">{{ overview_data.overview.approved_requests_count }}</div>
+                        <div class="small text-muted">Approved</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="overview-number">{{ overview_data.overview.rejected_requests_count }}</div>
+                        <div class="small text-muted">Rejected</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card shadow-sm border-0 admin-card">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Recent Requests</h2>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Request</th>
+                                <th>Type</th>
+                                <th>Requester</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in overview_data.requests_summary.recent_requests %}
+                            <tr>
+                                <td><a href="/admin/requests/{{ item.request_id }}">#{{ item.request_id }}</a></td>
+                                <td>{{ item.request_type_code }}</td>
+                                <td>{{ item.requester_name }}</td>
+                                <td>{{ item.status }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-muted">No recent requests.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-xl-6">
+        <div class="card shadow-sm border-0 admin-card mb-4">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Performance Snapshot</h2>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-3">
+                    <div class="col-6">
+                        <div class="overview-number">{{ overview_data.performance_summary.teams_reporting_count }}</div>
+                        <div class="small text-muted">Teams reporting today</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="overview-number">{{ overview_data.performance_summary.average_performance_percentage }}</div>
+                        <div class="small text-muted">Average performance %</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card shadow-sm border-0 admin-card">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Attendance Reports</h2>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-3">
+                    <div class="col-6">
+                        <div class="overview-number">{{ overview_data.current_month_reports_count }}</div>
+                        <div class="small text-muted">Current month reports</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="overview-number">{{ overview_data.current_month_worked_minutes }}</div>
+                        <div class="small text-muted">Worked minutes stored</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

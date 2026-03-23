@@ -1,0 +1,39 @@
+{% extends "admin/base.html" %}
+{% from "admin/partials/forms.html" import render_form %}
+{% from "admin/partials/table.html" import render_table %}
+{% block content %}
+<div class="mb-3">
+    <a href="{{ back_url }}" class="btn btn-outline-secondary btn-sm">Back</a>
+</div>
+<div class="row g-4">
+    <div class="col-12 col-xl-6">
+        <div class="card shadow-sm border-0 admin-card mb-4">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Details</h2>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    {% for item in detail_fields %}
+                    <dt class="col-sm-4">{{ item.label }}</dt>
+                    <dd class="col-sm-8">{{ item.value }}</dd>
+                    {% endfor %}
+                </dl>
+            </div>
+        </div>
+        {% for table in related_tables or [] %}
+        {{ render_table(table) }}
+        {% endfor %}
+    </div>
+    <div class="col-12 col-xl-6">
+        {% if edit_form %}
+        {{ render_form(edit_form, csrf_token) }}
+        {% endif %}
+        {% for form in secondary_forms or [] %}
+        {{ render_form(form, csrf_token) }}
+        {% endfor %}
+        {% for form in action_forms or [] %}
+        {{ render_form(form, csrf_token) }}
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

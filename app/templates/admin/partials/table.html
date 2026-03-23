@@ -1,0 +1,45 @@
+{% macro render_table(table, title=None) -%}
+<div class="card shadow-sm border-0 admin-card mb-4">
+    {% if title %}
+    <div class="card-header bg-white border-0 pb-0">
+        <h2 class="h5 mb-0">{{ title }}</h2>
+    </div>
+    {% endif %}
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        {% for column in table.columns %}
+                        <th>{{ column.label }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if table.rows %}
+                        {% for row in table.rows %}
+                        <tr>
+                            {% for column in table.columns %}
+                            {% set value = row.get(column.key) %}
+                            {% set link = row.get(column.key ~ '_url') %}
+                            <td>
+                                {% if link %}
+                                <a href="{{ link }}">{{ value }}</a>
+                                {% else %}
+                                {{ value }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="{{ table.columns|length }}" class="text-muted">No records found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{%- endmacro %}

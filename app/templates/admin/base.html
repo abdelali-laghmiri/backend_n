@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title or "Admin Panel" }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', path='admin/admin.css') }}" rel="stylesheet">
+</head>
+<body class="admin-shell">
+{% if current_admin %}
+    <div class="admin-layout">
+        <aside class="admin-sidebar">
+            <div class="sidebar-brand">
+                <div class="sidebar-title">System Admin</div>
+                <div class="sidebar-meta">{{ current_admin.matricule }}</div>
+            </div>
+            <nav class="sidebar-nav">
+                {% for item in nav_items %}
+                <a href="{{ item.url }}" class="sidebar-link{% if current_path == item.url %} active{% endif %}">
+                    {{ item.label }}
+                </a>
+                {% endfor %}
+            </nav>
+            <div class="sidebar-footer">
+                <a href="/admin/logout" class="btn btn-outline-light btn-sm w-100">Logout</a>
+            </div>
+        </aside>
+        <main class="admin-content">
+            <header class="page-header">
+                <div>
+                    <h1 class="page-title">{{ page_title }}</h1>
+                    {% if page_description %}
+                    <p class="page-description">{{ page_description }}</p>
+                    {% endif %}
+                </div>
+            </header>
+{% else %}
+    <main class="auth-shell">
+{% endif %}
+{% if flash_message %}
+    <div class="alert alert-{{ flash_level }} mb-4" role="alert">
+        {{ flash_message }}
+    </div>
+{% endif %}
+{% block content %}{% endblock %}
+{% if current_admin %}
+        </main>
+    </div>
+    <script>
+        document.addEventListener("submit", function (event) {
+            const confirmMessage = event.target.getAttribute("data-confirm");
+            if (confirmMessage && !window.confirm(confirmMessage)) {
+                event.preventDefault();
+            }
+        });
+    </script>
+{% else %}
+    </main>
+{% endif %}
+</body>
+</html>
