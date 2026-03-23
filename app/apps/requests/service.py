@@ -10,6 +10,13 @@ from sqlalchemy.orm import Session
 from app.apps.employees.models import Employee
 from app.apps.organization.models import Department, JobTitle, Team
 from app.apps.permissions.service import PermissionsService
+from app.apps.requests.leave_business import (
+    LeaveBusinessRuleError,
+    evaluate_leave_request,
+    is_leave_request_type_code,
+    validate_leave_field_definition,
+    validate_leave_request_type_fields,
+)
 from app.apps.requests.models import (
     RequestActionEnum,
     RequestActionHistory,
@@ -25,6 +32,7 @@ from app.apps.requests.models import (
     utcnow,
 )
 from app.apps.requests.schemas import (
+    LeaveRequestDetailsResponse,
     RequestActionHistoryResponse,
     RequestCreateRequest,
     RequestCurrentStepResponse,
@@ -133,8 +141,13 @@ class RequestsService:
     ) -> RequestTypeField:
         """Create a field definition for a request type."""
 
-        self.get_request_type(request_type_id)
+        request_type = self.get_request_type(request_type_id)
         self._ensure_unique_request_field_code(request_type_id, payload.code)
+        self._validate_request_field_business_definition(
+            request_type=request_type,
+            field_code=payload.code,
+            field_type=payload.field_type,
+        )
         default_value = self._normalize_value_for_type(
             field_type=payload.field_type.value,
             value=payload.default_value,
@@ -199,6 +212,7 @@ class RequestsService:
         """Update a request field definition."""
 
         request_field = self.get_request_field(request_field_id)
+        request_type = self.get_request_type(request_field.request_type_id)
         changes = payload.model_dump(exclude_unset=True)
 
         final_code = changes.get("code", request_field.code)
@@ -219,6 +233,11 @@ class RequestsService:
                 current_request_field_id=request_field.id,
             )
 
+        self._validate_request_field_business_definition(
+            request_type=request_type,
+            field_code=final_code,
+            field_type=final_field_type,
+        )
         normalized_default_value = self._normalize_value_for_type(
             field_type=final_field_type.value,
             value=final_default_value,
@@ -366,8 +385,14 @@ class RequestsService:
             request_type.id,
             active_only=True,
         )
+        self._validate_request_type_business_configuration(request_type, active_fields)
         self._validate_required_steps_resolvable(requester_employee, active_steps)
         normalized_values = self._normalize_submitted_values(active_fields, payload.values)
+        self._validate_request_business_rules(
+            request_type=request_type,
+            requester_employee=requester_employee,
+            normalized_values=normalized_values,
+        )
 
         workflow_request = WorkflowRequest(
             request_type_id=request_type.id,
@@ -601,12 +626,52 @@ class RequestsService:
                 self._build_request_action_history_response(action, actor_users)
                 for action in action_history
             ],
+            leave_details=self._build_leave_request_details(
+                request_type=request_type,
+                requester_employee_id=workflow_request.requester_employee_id,
+                field_values=field_values,
+            ),
             workflow_progress=self._build_workflow_progress(
                 workflow_request=workflow_request,
                 workflow_steps=workflow_steps,
                 action_history=action_history,
                 actor_users=actor_users,
             ),
+        )
+
+    def _build_leave_request_details(
+        self,
+        *,
+        request_type: RequestType,
+        requester_employee_id: int,
+        field_values: list[RequestFieldValue],
+    ) -> LeaveRequestDetailsResponse | None:
+        """Build computed leave metadata for leave request details."""
+
+        if not is_leave_request_type_code(request_type.code):
+            return None
+
+        requester_employee = self._get_requester_employee(requester_employee_id)
+        persisted_values = {
+            field_value.field_code: field_value.value for field_value in field_values
+        }
+        try:
+            leave_evaluation = evaluate_leave_request(
+                persisted_values,
+                requester_employee.available_leave_balance_days,
+                enforce_balance_check=False,
+            )
+        except LeaveBusinessRuleError:
+            return None
+
+        return LeaveRequestDetailsResponse(
+            date_start=leave_evaluation.date_start,
+            date_end=leave_evaluation.date_end,
+            requested_duration_days=leave_evaluation.requested_duration_days,
+            leave_option=leave_evaluation.leave_option.value,
+            leave_option_label=leave_evaluation.leave_option_label,
+            balance_validation_applied=leave_evaluation.balance_validation_applied,
+            requester_available_balance_days=leave_evaluation.available_balance_days,
         )
 
     def _build_request_summary(
@@ -938,6 +1003,62 @@ class RequestsService:
                 ) from exc
 
         raise RequestsValidationError(f"{label} must be a valid datetime.")
+
+    def _validate_request_type_business_configuration(
+        self,
+        request_type: RequestType,
+        active_fields: list[RequestTypeField],
+    ) -> None:
+        """Validate request-type configuration required by business-specific rules."""
+
+        if not is_leave_request_type_code(request_type.code):
+            return
+
+        try:
+            validate_leave_request_type_fields(active_fields)
+        except LeaveBusinessRuleError as exc:
+            raise RequestsValidationError(str(exc)) from exc
+
+    def _validate_request_business_rules(
+        self,
+        *,
+        request_type: RequestType,
+        requester_employee: Employee,
+        normalized_values: dict[str, Any],
+    ) -> None:
+        """Run type-specific business validation before request creation."""
+
+        if not is_leave_request_type_code(request_type.code):
+            return
+
+        try:
+            evaluate_leave_request(
+                normalized_values,
+                requester_employee.available_leave_balance_days,
+                enforce_balance_check=True,
+            )
+        except LeaveBusinessRuleError as exc:
+            raise RequestsValidationError(str(exc)) from exc
+
+    def _validate_request_field_business_definition(
+        self,
+        *,
+        request_type: RequestType,
+        field_code: str,
+        field_type: RequestFieldTypeEnum,
+    ) -> None:
+        """Validate business-specific field-definition constraints."""
+
+        if not is_leave_request_type_code(request_type.code):
+            return
+
+        try:
+            validate_leave_field_definition(
+                field_code=field_code,
+                field_type=field_type,
+            )
+        except LeaveBusinessRuleError as exc:
+            raise RequestsValidationError(str(exc)) from exc
 
     def _validate_required_steps_resolvable(
         self,

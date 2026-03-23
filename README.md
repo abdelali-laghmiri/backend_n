@@ -264,6 +264,7 @@ The employees module manages HR/business profiles separately from authentication
 - The linked user account uses the employee matricule for login.
 - Employee creation returns the generated temporary password once.
 - The linked account is active by default and must change password on first login.
+- Employee profiles store `available_leave_balance_days` for leave-request balance checks.
 - Route access is permission-driven with super-admin bypass.
 - `employees.read` protects list and detail endpoints.
 - `employees.create` and `employees.update` protect write operations.
@@ -279,6 +280,7 @@ $body = @{
     email = "aya.bennani@example.com"
     phone = "+212600000001"
     hire_date = "2026-03-23"
+    available_leave_balance_days = 12
     department_id = 1
     team_id = 1
     job_title_id = 1
@@ -309,6 +311,7 @@ Update an employee:
 $token = "paste-access-token-here"
 $body = @{
     phone = "+212600000099"
+    available_leave_balance_days = 15
     department_id = 1
     team_id = 1
     job_title_id = 1
@@ -336,6 +339,7 @@ The employee creation response includes the generated login data:
     "email": "aya.bennani@example.com",
     "phone": "+212600000001",
     "hire_date": "2026-03-23",
+    "available_leave_balance_days": 12,
     "department_id": 1,
     "team_id": 1,
     "job_title_id": 1,
@@ -439,6 +443,12 @@ The requests module provides a database-driven workflow engine for HR requests.
 - Conception steps are supported and completed automatically by the workflow engine in this first version.
 - Required unresolved approver steps block request creation or advancement.
 - Optional unresolved approver steps are skipped automatically and recorded in history.
+- When the request type code is `leave`, the backend expects active fields named `date_start`, `date_end`, and `leave_option`.
+- Leave duration is computed as inclusive calendar days: `date_end - date_start + 1`.
+- `paid leave` requires balance validation against the requester's `available_leave_balance_days`.
+- `unpaid leave` and `CTT` do not require balance validation in this version.
+- Leave balance is validated at submission time but is not deducted when the request is created.
+- Leave request details include computed `leave_details` metadata for frontend use.
 
 Create a request type:
 
@@ -462,8 +472,8 @@ Create request fields:
 
 ```powershell
 $token = "paste-access-token-here"
-$body = @{
-    code = "start_date"
+$dateStart = @{
+    code = "date_start"
     label = "Start Date"
     field_type = "date"
     is_required = $true
@@ -477,7 +487,56 @@ Invoke-RestMethod `
     -Uri "http://localhost:8000/api/v1/requests/types/1/fields" `
     -Headers @{ Authorization = "Bearer $token" } `
     -ContentType "application/json" `
-    -Body $body
+    -Body $dateStart
+
+$dateEnd = @{
+    code = "date_end"
+    label = "End Date"
+    field_type = "date"
+    is_required = $true
+    placeholder = "Select the last leave day"
+    help_text = "Use ISO date format"
+    sort_order = 2
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/requests/types/1/fields" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $dateEnd
+
+$leaveOption = @{
+    code = "leave_option"
+    label = "Leave Option"
+    field_type = "select"
+    is_required = $true
+    placeholder = "Choose paid leave, unpaid leave, or CTT"
+    help_text = "Supported values: paid leave, unpaid leave, CTT"
+    sort_order = 3
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/requests/types/1/fields" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $leaveOption
+
+$reason = @{
+    code = "reason"
+    label = "Reason"
+    field_type = "textarea"
+    is_required = $false
+    sort_order = 4
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/requests/types/1/fields" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $reason
 ```
 
 Create workflow steps:
@@ -515,15 +574,16 @@ Invoke-RestMethod `
     -Body $approval
 ```
 
-Submit a request:
+Submit a paid leave request:
 
 ```powershell
 $token = "paste-requester-access-token-here"
 $body = @{
     request_type_id = 1
     values = @{
-        start_date = "2026-04-01"
-        end_date = "2026-04-03"
+        date_start = "2026-04-01"
+        date_end = "2026-04-03"
+        leave_option = "paid leave"
         reason = "Family event"
     }
 } | ConvertTo-Json -Depth 5
@@ -534,6 +594,62 @@ Invoke-RestMethod `
     -Headers @{ Authorization = "Bearer $token" } `
     -ContentType "application/json" `
     -Body $body
+```
+
+Submit an unpaid leave request:
+
+```powershell
+$token = "paste-requester-access-token-here"
+$body = @{
+    request_type_id = 1
+    values = @{
+        date_start = "2026-05-12"
+        date_end = "2026-05-14"
+        leave_option = "unpaid leave"
+        reason = "Personal travel"
+    }
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/requests" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Failed paid leave request because the employee balance is too low:
+
+```powershell
+$token = "paste-requester-access-token-here"
+$body = @{
+    request_type_id = 1
+    values = @{
+        date_start = "2026-06-01"
+        date_end = "2026-06-10"
+        leave_option = "paid leave"
+        reason = "Extended vacation"
+    }
+} | ConvertTo-Json -Depth 5
+
+try {
+    Invoke-RestMethod `
+        -Method Post `
+        -Uri "http://localhost:8000/api/v1/requests" `
+        -Headers @{ Authorization = "Bearer $token" } `
+        -ContentType "application/json" `
+        -Body $body
+} catch {
+    $_.ErrorDetails.Message
+}
+```
+
+Expected error example:
+
+```json
+{
+  "detail": "Paid Leave requires 10 day(s) but only 5 day(s) are available."
+}
 ```
 
 Approve the current request step:

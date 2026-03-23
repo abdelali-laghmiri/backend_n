@@ -44,6 +44,7 @@ class EmployeeCreateRequest(BaseModel):
     email: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
     hire_date: date
+    available_leave_balance_days: int = Field(default=0, ge=0)
     department_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
     job_title_id: int = Field(ge=1)
@@ -78,6 +79,7 @@ class EmployeeUpdateRequest(BaseModel):
     email: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
     hire_date: date | None = None
+    available_leave_balance_days: int | None = Field(default=None, ge=0)
     department_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
     job_title_id: int | None = Field(default=None, ge=1)
@@ -124,6 +126,7 @@ class EmployeeResponse(BaseModel):
     email: str
     phone: str | None
     hire_date: date
+    available_leave_balance_days: int
     department_id: int | None
     team_id: int | None
     job_title_id: int

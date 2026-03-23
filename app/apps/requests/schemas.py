@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -341,9 +341,22 @@ class RequestSummaryResponse(BaseModel):
     updated_at: datetime
 
 
+class LeaveRequestDetailsResponse(BaseModel):
+    """Computed leave-specific metadata for leave request details."""
+
+    date_start: date
+    date_end: date
+    requested_duration_days: int
+    leave_option: str
+    leave_option_label: str
+    balance_validation_applied: bool
+    requester_available_balance_days: int
+
+
 class RequestDetailResponse(RequestSummaryResponse):
     """Detailed response for a submitted request."""
 
+    leave_details: LeaveRequestDetailsResponse | None = None
     submitted_values: list[RequestFieldValueResponse]
     action_history: list[RequestActionHistoryResponse]
     workflow_progress: list[RequestWorkflowProgressResponse]

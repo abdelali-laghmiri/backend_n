@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -32,6 +32,11 @@ class Employee(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     hire_date: Mapped[date] = mapped_column(Date, nullable=False)
+    available_leave_balance_days: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
     department_id: Mapped[int | None] = mapped_column(
         ForeignKey("departments.id", ondelete="SET NULL"),
         nullable=True,

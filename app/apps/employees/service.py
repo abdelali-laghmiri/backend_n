@@ -70,6 +70,7 @@ class EmployeesService:
             email=str(payload.email).lower(),
             phone=payload.phone,
             hire_date=payload.hire_date,
+            available_leave_balance_days=payload.available_leave_balance_days,
             department_id=department_id,
             team_id=team_id,
             job_title_id=payload.job_title_id,
@@ -156,6 +157,10 @@ class EmployeesService:
         final_email = str(changes.get("email", employee.email)).lower()
         final_phone = changes.get("phone", employee.phone)
         final_hire_date = changes.get("hire_date", employee.hire_date)
+        final_available_leave_balance_days = changes.get(
+            "available_leave_balance_days",
+            employee.available_leave_balance_days,
+        )
         final_job_title_id = changes.get("job_title_id", employee.job_title_id)
         final_is_active = changes.get("is_active", employee.is_active)
 
@@ -188,6 +193,7 @@ class EmployeesService:
         employee.email = final_email
         employee.phone = final_phone
         employee.hire_date = final_hire_date
+        employee.available_leave_balance_days = final_available_leave_balance_days
         employee.department_id = department_id
         employee.team_id = team_id
         employee.job_title_id = final_job_title_id
@@ -214,6 +220,7 @@ class EmployeesService:
             "last_name": "Last name",
             "email": "Email",
             "hire_date": "Hire date",
+            "available_leave_balance_days": "Available leave balance days",
             "job_title_id": "Job title",
         }
         for field_name, label in required_fields.items():
