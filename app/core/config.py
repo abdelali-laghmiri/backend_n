@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     )
     app_host: str = Field(default="0.0.0.0", validation_alias="APP_HOST")
     app_port: int = Field(default=8000, validation_alias="APP_PORT")
+    forwarded_allow_ips: str = Field(
+        default="127.0.0.1",
+        validation_alias="FORWARDED_ALLOW_IPS",
+    )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(
         default=60,
