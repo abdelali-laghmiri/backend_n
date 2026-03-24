@@ -1,6 +1,6 @@
 # HR Management Backend Skeleton
 
-This project implements a modular HR management backend built with FastAPI, SQLAlchemy, Alembic, and Docker. The current codebase includes infrastructure, setup, authentication, organization, employees, permissions, and a generic requests engine foundation.
+This project implements a modular HR management backend built with FastAPI, SQLAlchemy, Alembic, and Docker. The backend stays API-centric so the same service can support web frontends, Windows desktop clients, and Android clients from one codebase. The current codebase includes infrastructure, setup, authentication, organization, employees, permissions, and a generic requests engine foundation.
 
 ## Configuration
 
@@ -12,7 +12,7 @@ Application settings are centralized in `app/core/config.py` and loaded from `.e
 - Docker Compose keeps the same codebase and switches the backend to PostgreSQL through environment variables only.
 - The setup module reads the first super admin bootstrap values from `SUPERADMIN_*` environment variables.
 - Authentication uses `SECRET_KEY`, `JWT_ALGORITHM`, and `ACCESS_TOKEN_EXPIRE_MINUTES` from `.env`.
-- Browser access is restricted by `CORS_ALLOW_ORIGINS`, a comma-separated allowlist of approved frontend origins.
+- Browser access is restricted by `CORS_ALLOW_ORIGINS`, a comma-separated allowlist of approved web frontend origins.
 
 Create a local `.env` file before running anything:
 
@@ -22,22 +22,24 @@ Copy-Item .env.example .env
 
 ## CORS Configuration
 
-The backend accepts browser requests only from the origins listed in `CORS_ALLOW_ORIGINS`.
+`CORS_ALLOW_ORIGINS` controls browser-based cross-origin access only.
 
 - Leave it empty if you do not want to allow any browser frontend origins yet.
-- Use a comma-separated list when more than one frontend should be allowed.
+- Use a comma-separated list when more than one web frontend should be allowed.
+- Every entry must be an explicit `http://` or `https://` origin without a path.
 - The backend does not use `allow_origins=["*"]` in this configuration.
+- Android and Windows desktop clients are still supported because they call the same authenticated API directly and are not governed by browser CORS.
 
 Development example:
 
 ```env
-CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:5173
+CORS_ALLOW_ORIGINS=http://localhost:3000
 ```
 
 Production example:
 
 ```env
-CORS_ALLOW_ORIGINS=https://my-frontend-production.app,https://admin.my-company.com
+CORS_ALLOW_ORIGINS=https://my-web-frontend.app
 ```
 
 When the allowlist is configured, the backend enables CORS with:

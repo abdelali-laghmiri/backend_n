@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Annotated
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -122,29 +122,67 @@ class Settings(BaseSettings):
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def parse_cors_allow_origins(cls, value: object) -> list[str]:
-        """Parse a comma-separated list of allowed browser origins."""
+        """Parse explicit browser origins allowed to use CORS."""
 
         if value is None:
             return []
 
+        raw_origins: list[str]
         if isinstance(value, str):
-            normalized_values = [
-                origin.strip()
-                for origin in value.split(",")
-                if origin.strip()
-            ]
-            return normalized_values
-
-        if isinstance(value, (list, tuple, set)):
-            normalized_values = [
+            raw_origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+        elif isinstance(value, (list, tuple, set)):
+            raw_origins = [
                 str(origin).strip()
                 for origin in value
                 if str(origin).strip()
             ]
-            return normalized_values
+        else:
+            normalized_value = str(value).strip()
+            raw_origins = [normalized_value] if normalized_value else []
 
-        normalized_value = str(value).strip()
-        return [normalized_value] if normalized_value else []
+        normalized_origins: list[str] = []
+        seen_origins: set[str] = set()
+
+        for origin in raw_origins:
+            if origin == "*":
+                raise ValueError(
+                    "CORS_ALLOW_ORIGINS must contain explicit browser origins, not '*'."
+                )
+
+            parsed_origin = urlsplit(origin)
+            if parsed_origin.scheme.lower() not in {"http", "https"}:
+                raise ValueError(
+                    "Each CORS origin must start with http:// or https://."
+                )
+
+            if not parsed_origin.netloc:
+                raise ValueError(
+                    "Each CORS origin must include a host, for example https://app.example.com."
+                )
+
+            if parsed_origin.username or parsed_origin.password:
+                raise ValueError(
+                    "CORS origins must not include user credentials."
+                )
+
+            if parsed_origin.path not in ("", "/"):
+                raise ValueError(
+                    "CORS origins must not include a path. Use the origin only."
+                )
+
+            if parsed_origin.query or parsed_origin.fragment:
+                raise ValueError(
+                    "CORS origins must not include query strings or fragments."
+                )
+
+            normalized_origin = (
+                f"{parsed_origin.scheme.lower()}://{parsed_origin.netloc.lower()}"
+            )
+            if normalized_origin not in seen_origins:
+                seen_origins.add(normalized_origin)
+                normalized_origins.append(normalized_origin)
+
+        return normalized_origins
 
     @field_validator("debug", "db_echo", mode="before")
     @classmethod

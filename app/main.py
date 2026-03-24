@@ -23,10 +23,14 @@ app = FastAPI(
     openapi_tags=API_TAGS,
 )
 
-if settings.cors_allow_origins:
+browser_cors_allow_origins = settings.cors_allow_origins
+
+if browser_cors_allow_origins:
+    # CORS applies only to browser-based cross-origin requests.
+    # Native desktop and mobile clients can use the authenticated API directly.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_allow_origins,
+        allow_origins=browser_cors_allow_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
