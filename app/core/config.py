@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Annotated
 from urllib.parse import quote_plus
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.shared.enums import EnvironmentEnum
 
@@ -45,6 +46,10 @@ class Settings(BaseSettings):
     forwarded_allow_ips: str = Field(
         default="127.0.0.1",
         validation_alias="FORWARDED_ALLOW_IPS",
+    )
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="CORS_ALLOW_ORIGINS",
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(
@@ -113,6 +118,33 @@ class Settings(BaseSettings):
             return stripped_value or None
 
         return str(value)
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def parse_cors_allow_origins(cls, value: object) -> list[str]:
+        """Parse a comma-separated list of allowed browser origins."""
+
+        if value is None:
+            return []
+
+        if isinstance(value, str):
+            normalized_values = [
+                origin.strip()
+                for origin in value.split(",")
+                if origin.strip()
+            ]
+            return normalized_values
+
+        if isinstance(value, (list, tuple, set)):
+            normalized_values = [
+                str(origin).strip()
+                for origin in value
+                if str(origin).strip()
+            ]
+            return normalized_values
+
+        normalized_value = str(value).strip()
+        return [normalized_value] if normalized_value else []
 
     @field_validator("debug", "db_echo", mode="before")
     @classmethod

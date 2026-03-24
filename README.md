@@ -12,12 +12,39 @@ Application settings are centralized in `app/core/config.py` and loaded from `.e
 - Docker Compose keeps the same codebase and switches the backend to PostgreSQL through environment variables only.
 - The setup module reads the first super admin bootstrap values from `SUPERADMIN_*` environment variables.
 - Authentication uses `SECRET_KEY`, `JWT_ALGORITHM`, and `ACCESS_TOKEN_EXPIRE_MINUTES` from `.env`.
+- Browser access is restricted by `CORS_ALLOW_ORIGINS`, a comma-separated allowlist of approved frontend origins.
 
 Create a local `.env` file before running anything:
 
 ```powershell
 Copy-Item .env.example .env
 ```
+
+## CORS Configuration
+
+The backend accepts browser requests only from the origins listed in `CORS_ALLOW_ORIGINS`.
+
+- Leave it empty if you do not want to allow any browser frontend origins yet.
+- Use a comma-separated list when more than one frontend should be allowed.
+- The backend does not use `allow_origins=["*"]` in this configuration.
+
+Development example:
+
+```env
+CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:5173
+```
+
+Production example:
+
+```env
+CORS_ALLOW_ORIGINS=https://my-frontend-production.app,https://admin.my-company.com
+```
+
+When the allowlist is configured, the backend enables CORS with:
+
+- `allow_credentials=True`
+- `allow_methods=GET, POST, PUT, PATCH, DELETE, OPTIONS`
+- `allow_headers=Authorization, Content-Type, Accept, Origin, X-Requested-With`
 
 ## Run Locally With SQLite
 
