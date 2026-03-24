@@ -11,6 +11,9 @@ from app.core.config import settings
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
 
+APP_DIR = Path(__file__).resolve().parent
+STATIC_DIR = APP_DIR / "static"
+
 app = FastAPI(
     title=settings.project_name,
     version=settings.project_version,
@@ -47,7 +50,7 @@ def health_check() -> HealthResponse:
 
 app.mount(
     "/static",
-    StaticFiles(directory=str(Path(__file__).resolve().parent / "static")),
+    StaticFiles(directory=str(STATIC_DIR)),
     name="static",
 )
 app.include_router(admin_router)
