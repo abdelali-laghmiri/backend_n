@@ -33,6 +33,16 @@
                     {% if page_description %}
                     <p class="page-description">{{ page_description }}</p>
                     {% endif %}
+                    {% if installation_snapshot %}
+                    <div class="mt-3">
+                        {% if installation_snapshot.initialized %}
+                        <span class="badge text-bg-success">Installation completed</span>
+                        {% else %}
+                        <span class="badge text-bg-warning">Setup wizard pending</span>
+                        <a href="/admin/setup-wizard" class="btn btn-sm btn-outline-warning ms-2">Open setup wizard</a>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
             </header>
 {% else %}

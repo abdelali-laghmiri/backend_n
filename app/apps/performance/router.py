@@ -159,7 +159,7 @@ def get_active_objective_for_team(
 def submit_daily_performance(
     payload: TeamDailyPerformanceCreateRequest,
     service: PerformanceService = Depends(get_performance_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("performance.create")),
 ) -> TeamDailyPerformanceResponse:
     try:
         performance = service.submit_daily_performance(current_user, payload)
@@ -185,7 +185,7 @@ def list_daily_performances(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: PerformanceService = Depends(get_performance_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("performance.read")),
 ) -> list[TeamDailyPerformanceResponse]:
     try:
         performances = service.list_daily_performances(
@@ -214,7 +214,7 @@ def get_daily_performance(
     team_id: int,
     performance_date: date = Path(...),
     service: PerformanceService = Depends(get_performance_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("performance.read")),
 ) -> TeamDailyPerformanceResponse:
     try:
         performance = service.get_daily_performance(

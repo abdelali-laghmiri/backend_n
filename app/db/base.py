@@ -17,6 +17,7 @@ from app.apps.requests.models import (  # noqa: F401
     RequestWorkflowStep,
     WorkflowRequest,
 )
+from app.apps.setup.models import InstallationState  # noqa: F401
 from app.apps.users.models import User  # noqa: F401
 from app.core.database import Base
 

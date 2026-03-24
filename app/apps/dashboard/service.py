@@ -939,15 +939,9 @@ class DashboardService:
             return True
 
         permissions_service = PermissionsService(self.db)
-        return (
-            permissions_service.user_has_permission(
-                current_user,
-                self.DASHBOARD_READ_PERMISSION,
-            )
-            or permissions_service.user_has_permission(
-                current_user,
-                self.DASHBOARD_MANAGE_PERMISSION,
-            )
+        return permissions_service.user_has_permission(
+            current_user,
+            self.DASHBOARD_MANAGE_PERMISSION,
         )
 
     def _get_employee_by_user_id(self, user_id: int) -> Employee | None:

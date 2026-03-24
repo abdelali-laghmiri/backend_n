@@ -60,6 +60,7 @@ from app.apps.requests.schemas import (
     RequestWorkflowStepUpdateRequest,
 )
 from app.apps.requests.service import RequestsService
+from app.apps.setup.service import SetupService
 from app.apps.users.models import User
 from app.core.config import Settings
 from app.core.security import JWTManager, PasswordManager, TokenValidationError
@@ -104,6 +105,7 @@ class AdminPanelService:
         self.requests_service = RequestsService(db=db)
         self.attendance_service = AttendanceService(db=db)
         self.performance_service = PerformanceService(db=db)
+        self.setup_service = SetupService(db=db, settings=settings)
 
     def authenticate_super_admin(self, *, matricule: str, password: str) -> User:
         """Authenticate an admin-panel user and require super admin access."""
@@ -234,6 +236,11 @@ class AdminPanelService:
             "current_month_reports_count": int(current_month_reports[0] or 0),
             "current_month_worked_minutes": int(current_month_reports[1] or 0),
         }
+
+    def get_installation_snapshot(self) -> dict[str, Any]:
+        """Return the persisted installation snapshot for layout badges and wizard routes."""
+
+        return self.setup_service.get_installation_snapshot()
 
     def list_users(
         self,

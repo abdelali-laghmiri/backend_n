@@ -19,6 +19,7 @@ from app.apps.dashboard.service import (
     DashboardService,
     DashboardValidationError,
 )
+from app.apps.permissions.dependencies import require_permission
 from app.apps.users.models import User
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -63,7 +64,7 @@ def get_overview(
     team_id: int | None = Query(default=None, ge=1),
     department_id: int | None = Query(default=None, ge=1),
     service: DashboardService = Depends(get_dashboard_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardOverviewResponse:
     try:
         return service.get_overview(
@@ -89,7 +90,7 @@ def get_requests_summary(
     department_id: int | None = Query(default=None, ge=1),
     recent_limit: int = Query(default=5, ge=1, le=20),
     service: DashboardService = Depends(get_dashboard_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardRequestsSummaryResponse:
     try:
         return service.get_requests_summary(
@@ -117,7 +118,7 @@ def get_attendance_summary(
     team_id: int | None = Query(default=None, ge=1),
     department_id: int | None = Query(default=None, ge=1),
     service: DashboardService = Depends(get_dashboard_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardAttendanceSummaryResponse:
     try:
         return service.get_attendance_summary(
@@ -143,7 +144,7 @@ def get_performance_summary(
     team_id: int | None = Query(default=None, ge=1),
     department_id: int | None = Query(default=None, ge=1),
     service: DashboardService = Depends(get_dashboard_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardPerformanceSummaryResponse:
     try:
         return service.get_performance_summary(
@@ -166,7 +167,7 @@ def get_employees_summary(
     team_id: int | None = Query(default=None, ge=1),
     department_id: int | None = Query(default=None, ge=1),
     service: DashboardService = Depends(get_dashboard_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("dashboard.read")),
 ) -> DashboardEmployeesSummaryResponse:
     try:
         return service.get_employees_summary(

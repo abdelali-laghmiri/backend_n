@@ -27,13 +27,7 @@ router = APIRouter(prefix="/setup", tags=["Setup"])
 def get_setup_status(
     service: SetupService = Depends(get_setup_service),
 ) -> SetupStatusResponse:
-    initialized = service.is_initialized()
-    detail = (
-        "System initialization has already been completed."
-        if initialized
-        else "System is ready for the initial setup."
-    )
-    return SetupStatusResponse(initialized=initialized, detail=detail)
+    return SetupStatusResponse.model_validate(service.get_status())
 
 
 @router.post(
@@ -64,6 +58,12 @@ def initialize_system(
         ) from exc
 
     return SetupInitializeResponse(
-        detail="System initialized successfully.",
+        initialized=False,
+        bootstrap_super_admin_exists=True,
+        setup_wizard_required=True,
+        detail=(
+            "Bootstrap super admin created successfully. "
+            "Finish the installation from /admin/setup-wizard."
+        ),
         super_admin=BootstrapSuperAdminResponse.model_validate(super_admin),
     )

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.apps.auth.dependencies import get_current_super_admin
-from app.apps.permissions.dependencies import get_permissions_service
+from app.apps.permissions.dependencies import get_permissions_service, require_permission
 from app.apps.permissions.schemas import (
     JobTitlePermissionAssignmentRequest,
     JobTitlePermissionAssignmentResponse,
@@ -55,7 +54,7 @@ def raise_permissions_http_error(exc: Exception) -> None:
 def create_permission(
     payload: PermissionCreateRequest,
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.create")),
 ) -> PermissionResponse:
     try:
         permission = service.create_permission(payload)
@@ -75,7 +74,7 @@ def list_permissions(
     include_inactive: bool = Query(default=False),
     module: str | None = Query(default=None),
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.read")),
 ) -> list[PermissionResponse]:
     permissions = service.list_permissions(
         include_inactive=include_inactive,
@@ -93,7 +92,7 @@ def list_permissions(
 def get_permission(
     permission_id: int,
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.read")),
 ) -> PermissionResponse:
     try:
         permission = service.get_permission(permission_id)
@@ -113,7 +112,7 @@ def update_permission(
     permission_id: int,
     payload: PermissionUpdateRequest,
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.update")),
 ) -> PermissionResponse:
     try:
         permission = service.update_permission(permission_id, payload)
@@ -137,7 +136,7 @@ def assign_permissions_to_job_title(
     job_title_id: int,
     payload: JobTitlePermissionAssignmentRequest,
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.assign")),
 ) -> JobTitlePermissionAssignmentResponse:
     try:
         return service.assign_permissions_to_job_title(job_title_id, payload)
@@ -158,7 +157,7 @@ def assign_permissions_to_job_title(
 def get_job_title_permissions(
     job_title_id: int,
     service: PermissionsService = Depends(get_permissions_service),
-    _current_user: User = Depends(get_current_super_admin),
+    _current_user: User = Depends(require_permission("permissions.read")),
 ) -> JobTitlePermissionAssignmentResponse:
     try:
         return service.get_job_title_permission_assignment(job_title_id)

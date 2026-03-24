@@ -1,0 +1,59 @@
+{% extends "admin/base.html" %}
+{% from "admin/partials/forms.html" import render_form %}
+{% from "admin/partials/table.html" import render_table %}
+{% block content %}
+<div class="card shadow-sm border-0 admin-card mb-4">
+    <div class="card-body">
+        <div class="wizard-step-list">
+            {% for item in wizard_steps %}
+            <a
+                href="/admin/setup-wizard/step/{{ item.number }}"
+                class="wizard-step{% if item.number == wizard_current_step %} active{% elif installation_snapshot and installation_snapshot.last_completed_step >= item.number %} completed{% endif %}"
+            >
+                <span class="wizard-step-number">{{ item.number }}</span>
+                <span>{{ item.title }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% if installation_snapshot and installation_snapshot.initialized %}
+<div class="alert alert-success mb-4">
+    <div class="fw-semibold mb-1">Installation completed</div>
+    <div>The setup wizard is now locked. These pages remain available in read-only mode for review.</div>
+</div>
+{% else %}
+<div class="alert alert-warning mb-4">
+    <div class="fw-semibold mb-1">Installation not completed yet</div>
+    <div>Initialization becomes true only when the final review step succeeds.</div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-12 col-xl-4">
+        {% if wizard_form and not wizard_read_only %}
+        {{ render_form(wizard_form, csrf_token) }}
+        {% endif %}
+        <div class="card shadow-sm border-0 admin-card">
+            <div class="card-header bg-white border-0 pb-0">
+                <h2 class="h5 mb-0">Navigation</h2>
+            </div>
+            <div class="card-body d-grid gap-2">
+                {% if wizard_previous_url %}
+                <a href="{{ wizard_previous_url }}" class="btn btn-outline-secondary">Previous step</a>
+                {% endif %}
+                {% if wizard_next_url %}
+                <a href="{{ wizard_next_url }}" class="btn btn-outline-primary">Next step</a>
+                {% endif %}
+                <a href="/admin" class="btn btn-outline-dark">Admin overview</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-xl-8">
+        {% for table in wizard_tables %}
+        {{ render_table(table) }}
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

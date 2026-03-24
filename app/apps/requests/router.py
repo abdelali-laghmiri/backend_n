@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.apps.auth.dependencies import get_current_active_user
 from app.apps.permissions.dependencies import require_permission
 from app.apps.requests.dependencies import get_requests_service
 from app.apps.requests.schemas import (
@@ -296,7 +295,7 @@ def update_workflow_step(
 def create_request(
     payload: RequestCreateRequest,
     service: RequestsService = Depends(get_requests_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("requests.create")),
 ) -> RequestDetailResponse:
     try:
         workflow_request = service.create_request(current_user, payload)
@@ -314,7 +313,7 @@ def create_request(
 )
 def list_my_requests(
     service: RequestsService = Depends(get_requests_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("requests.read")),
 ) -> list[RequestSummaryResponse]:
     workflow_requests = service.list_requests_for_user(current_user)
     return service.build_request_summaries(workflow_requests)
@@ -329,7 +328,7 @@ def list_my_requests(
 def get_request(
     request_id: int,
     service: RequestsService = Depends(get_requests_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("requests.read")),
 ) -> RequestDetailResponse:
     try:
         workflow_request = service.get_request_for_user(request_id, current_user)
@@ -349,7 +348,7 @@ def approve_request_step(
     request_id: int,
     payload: RequestStepActionRequest,
     service: RequestsService = Depends(get_requests_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("requests.approve")),
 ) -> RequestDetailResponse:
     try:
         workflow_request = service.approve_current_step(
@@ -378,7 +377,7 @@ def reject_request_step(
     request_id: int,
     payload: RequestStepActionRequest,
     service: RequestsService = Depends(get_requests_service),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("requests.approve")),
 ) -> RequestDetailResponse:
     try:
         workflow_request = service.reject_current_step(

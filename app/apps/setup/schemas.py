@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,7 +9,10 @@ class SetupStatusResponse(BaseModel):
     """Response schema for setup initialization status."""
 
     initialized: bool
+    bootstrap_super_admin_exists: bool
+    setup_wizard_required: bool
     detail: str
+    initialized_at: datetime | None = None
 
 
 class BootstrapSuperAdminResponse(BaseModel):
@@ -31,8 +33,10 @@ class BootstrapSuperAdminResponse(BaseModel):
 
 
 class SetupInitializeResponse(BaseModel):
-    """Response schema for a successful one-time initialization."""
+    """Response schema for bootstrap super admin creation."""
 
-    initialized: Literal[True] = True
+    initialized: bool
+    bootstrap_super_admin_exists: bool
+    setup_wizard_required: bool
     detail: str
     super_admin: BootstrapSuperAdminResponse

@@ -82,6 +82,12 @@ from app.apps.requests.service import (
     RequestsNotFoundError,
     RequestsValidationError,
 )
+from app.apps.setup.service import (
+    SetupAlreadyInitializedError,
+    SetupConfigurationError,
+    SetupInitializationError,
+    SetupValidationError,
+)
 from app.apps.users.models import User
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
@@ -112,11 +118,16 @@ HANDLED_EXCEPTIONS = (
     RequestsConflictError,
     RequestsNotFoundError,
     RequestsValidationError,
+    SetupAlreadyInitializedError,
+    SetupConfigurationError,
+    SetupInitializationError,
+    SetupValidationError,
     ValidationError,
 )
 
 NAV_ITEMS = [
     {"label": "Overview", "url": "/admin"},
+    {"label": "Setup Wizard", "url": "/admin/setup-wizard"},
     {"label": "Users", "url": "/admin/users"},
     {"label": "Employees", "url": "/admin/employees"},
     {"label": "Departments", "url": "/admin/departments"},
@@ -131,6 +142,16 @@ NAV_ITEMS = [
     {"label": "Attendance Monthly", "url": "/admin/attendance/monthly"},
     {"label": "Performance Objectives", "url": "/admin/performance/objectives"},
     {"label": "Performance Records", "url": "/admin/performance/records"},
+]
+
+SETUP_WIZARD_STEPS = [
+    {"number": 1, "title": "System Readiness"},
+    {"number": 2, "title": "Core Organization"},
+    {"number": 3, "title": "Job Titles"},
+    {"number": 4, "title": "Permission Catalog"},
+    {"number": 5, "title": "Permission Assignment"},
+    {"number": 6, "title": "Operational Users"},
+    {"number": 7, "title": "Final Review"},
 ]
 
 
@@ -167,6 +188,14 @@ def _redirect_with_message(
     )
 
 
+def _redirect_to_setup_wizard(message: str | None = None) -> RedirectResponse:
+    target_url = "/admin/setup-wizard"
+    if message is not None:
+        return _redirect_with_message(target_url, message=message, level="warning")
+
+    return RedirectResponse(url=target_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 def _flash(request: Request) -> dict[str, str | None]:
     return {
         "flash_message": request.query_params.get("message"),
@@ -199,6 +228,7 @@ def _render(
     merged_context = _base_context(request, current_admin=current_admin)
     if current_admin is not None and service is not None:
         merged_context["csrf_token"] = service.create_csrf_token_for_user(current_admin)
+        merged_context["installation_snapshot"] = service.get_installation_snapshot()
 
     merged_context.update(context)
     return templates.TemplateResponse(template_name, merged_context)
@@ -248,6 +278,14 @@ def _parse_date_value(value: str | None) -> date | None:
         raise AdminPanelValidationError("Date values must use the YYYY-MM-DD format.") from exc
 
 
+def _parse_required_date_value(value: str | None, label: str) -> date:
+    parsed_value = _parse_date_value(value)
+    if parsed_value is None:
+        raise AdminPanelValidationError(f"{label} is required.")
+
+    return parsed_value
+
+
 def _parse_enum(enum_class, value: str | None, label: str):
     if value is None or value == "":
         return None
@@ -295,6 +333,126 @@ def _table(columns: list[dict[str, str]], rows: list[dict[str, object]]) -> dict
     return {"columns": columns, "rows": rows}
 
 
+def _get_setup_step(step_number: int) -> dict[str, object]:
+    for step in SETUP_WIZARD_STEPS:
+        if step["number"] == step_number:
+            return step
+
+    raise AdminPanelValidationError("Unknown setup wizard step.")
+
+
+def _setup_step_url(step_number: int) -> str:
+    return f"/admin/setup-wizard/step/{step_number}"
+
+
+def _build_setup_summary_tables(service: AdminPanelService) -> list[dict[str, object]]:
+    review_summary = service.setup_service.get_review_summary()
+    organization = review_summary["organization"]
+    job_titles = review_summary["job_titles"]["job_titles"]
+    permissions = review_summary["permissions"]["permissions"]
+    assignments = review_summary["job_title_permissions"]["assignments"]
+    operational_users = review_summary["operational_users"]["employees"]
+
+    tables: list[dict[str, object]] = []
+    department = organization["department"]
+    teams = organization["teams"]
+    tables.append(
+        _table(
+            [
+                {"key": "kind", "label": "Record"},
+                {"key": "value", "label": "Current value"},
+            ],
+            [
+                {
+                    "kind": "Department",
+                    "value": f"{department.code} - {department.name}" if department else "Not created",
+                    "value_url": f"/admin/departments/{department.id}" if department else None,
+                },
+                {
+                    "kind": "Teams",
+                    "value": ", ".join(f"{team.code} - {team.name}" for team in teams) if teams else "Not created",
+                },
+            ],
+        )
+    )
+    tables.append(
+        _table(
+            [
+                {"key": "code", "label": "Job title code"},
+                {"key": "name", "label": "Name"},
+            ],
+            [
+                {
+                    "code": job_title.code,
+                    "code_url": f"/admin/job-titles/{job_title.id}",
+                    "name": job_title.name,
+                }
+                for job_title in job_titles
+            ],
+        )
+    )
+    tables.append(
+        _table(
+            [
+                {"key": "code", "label": "Permission code"},
+                {"key": "module", "label": "Module"},
+            ],
+            [
+                {
+                    "code": permission.code,
+                    "code_url": f"/admin/permissions/{permission.id}",
+                    "module": permission.module,
+                }
+                for permission in permissions
+            ],
+        )
+    )
+    tables.append(
+        _table(
+            [
+                {"key": "job_title", "label": "Job title"},
+                {"key": "permissions", "label": "Assigned permissions"},
+            ],
+            [
+                {
+                    "job_title": job_title_code,
+                    "permissions": ", ".join(permission.code for permission in assigned_permissions)
+                    if assigned_permissions
+                    else "Not assigned",
+                }
+                for job_title_code, assigned_permissions in assignments.items()
+            ],
+        )
+    )
+    tables.append(
+        _table(
+            [
+                {"key": "role", "label": "Role"},
+                {"key": "account", "label": "Account"},
+                {"key": "team", "label": "Team"},
+            ],
+            [
+                {
+                    "role": item["role_label"],
+                    "account": (
+                        f"{item['user'].matricule} - {item['user'].first_name} {item['user'].last_name}"
+                        if item["user"] is not None
+                        else "Missing"
+                    ),
+                    "account_url": (
+                        f"/admin/users/{item['user'].id}"
+                        if item["user"] is not None
+                        else None
+                    ),
+                    "team": item["team"].name if item["team"] is not None else "-",
+                }
+                for item in operational_users
+            ],
+        )
+    )
+    return tables
+
+
 @router.get("/login", response_class=HTMLResponse)
 def admin_login_page(
     request: Request,
@@ -302,7 +460,10 @@ def admin_login_page(
 ) -> HTMLResponse:
     current_admin = _current_admin(request, service)
     if current_admin is not None:
-        return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+        if service.setup_service.is_initialized():
+            return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+
+        return _redirect_to_setup_wizard()
 
     return templates.TemplateResponse(
         "admin/login.html",
@@ -342,7 +503,16 @@ async def admin_login_submit(
         )
 
     token, max_age = service.create_admin_access_token_for_user(user)
-    response = RedirectResponse(url=next_url, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(
+        url=(
+            "/admin"
+            if service.setup_service.is_initialized()
+            else "/admin/setup-wizard"
+        ),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    if service.setup_service.is_initialized():
+        response = RedirectResponse(url=next_url, status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
         key=service.ADMIN_COOKIE_NAME,
         value=token,
@@ -375,6 +545,11 @@ def admin_overview(
     if current_admin is None:
         return _redirect_to_login(request)
 
+    if not service.setup_service.is_initialized():
+        return _redirect_to_setup_wizard(
+            "Finish the setup wizard before using the rest of the admin dashboard."
+        )
+
     overview_data = service.get_overview(current_admin)
     return _render(
         request,
@@ -383,6 +558,439 @@ def admin_overview(
         service=service,
         page_title="Admin Overview",
         overview_data=overview_data,
+    )
+
+
+def _render_setup_wizard_page(
+    request: Request,
+    *,
+    service: AdminPanelService,
+    current_admin: User,
+    step_number: int,
+) -> HTMLResponse:
+    setup_service = service.setup_service
+    installation_snapshot = service.get_installation_snapshot()
+    read_only = installation_snapshot["initialized"]
+    setup_step = _get_setup_step(step_number)
+    step_form: dict[str, object] | None = None
+    supporting_tables: list[dict[str, object]] = []
+
+    if step_number == 1:
+        readiness = setup_service.get_readiness_summary()
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "item", "label": "Item"},
+                    {"key": "status", "label": "Status"},
+                ],
+                [
+                    {"item": "Database connectivity", "status": "Ready" if readiness["database_ready"] else "Pending"},
+                    {"item": "Migration status assumption", "status": "Ready" if readiness["migrations_ready"] else "Pending"},
+                    {
+                        "item": "Bootstrap super admin",
+                        "status": (
+                            f"{readiness['super_admin'].matricule} is available"
+                            if readiness["super_admin"] is not None
+                            else "Not created yet"
+                        ),
+                    },
+                    {
+                        "item": "Installation state",
+                        "status": "Completed" if readiness["initialized"] else "Pending",
+                    },
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": _setup_step_url(1),
+                "submit_label": "Continue to organization setup",
+                "title": "Acknowledge readiness",
+                "description": "The wizard will create the minimum initial data required for the system to start operating safely.",
+                "fields": [],
+            }
+    elif step_number == 2:
+        organization_summary = setup_service.get_organization_summary()
+        department = organization_summary["department"]
+        teams = organization_summary["teams"]
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "kind", "label": "Record"},
+                    {"key": "value", "label": "Current value"},
+                ],
+                [
+                    {
+                        "kind": "Department",
+                        "value": f"{department.code} - {department.name}" if department else "Not created",
+                        "value_url": f"/admin/departments/{department.id}" if department else None,
+                    },
+                    {
+                        "kind": "Teams",
+                        "value": ", ".join(f"{team.code} - {team.name}" for team in teams) if teams else "Not created",
+                    },
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": _setup_step_url(2),
+                "submit_label": "Save organization and continue",
+                "title": "Create the first department and two teams",
+                "description": "These records become the base structure used by employees, attendance, performance, and workflow routing.",
+                "fields": [
+                    _field(name="department_name", label="Department name", value=department.name if department else "Human Resources", required=True),
+                    _field(name="department_code", label="Department code", value=department.code if department else "HR", required=True),
+                    _field(name="department_description", label="Department description", field_type="textarea", value=department.description if department else "Initial operational department created by the setup wizard."),
+                    _field(name="team_one_name", label="Team 1 name", value=teams[0].name if len(teams) > 0 else "Operations Team", required=True),
+                    _field(name="team_one_code", label="Team 1 code", value=teams[0].code if len(teams) > 0 else "OPS", required=True),
+                    _field(name="team_one_description", label="Team 1 description", field_type="textarea", value=teams[0].description if len(teams) > 0 else "First operational team."),
+                    _field(name="team_two_name", label="Team 2 name", value=teams[1].name if len(teams) > 1 else "Support Team", required=True),
+                    _field(name="team_two_code", label="Team 2 code", value=teams[1].code if len(teams) > 1 else "SUPPORT", required=True),
+                    _field(name="team_two_description", label="Team 2 description", field_type="textarea", value=teams[1].description if len(teams) > 1 else "Second operational team."),
+                ],
+            }
+    elif step_number == 3:
+        job_titles_summary = setup_service.get_job_titles_summary()["job_titles"]
+        job_title_map = {item.code: item for item in job_titles_summary}
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "code", "label": "Code"},
+                    {"key": "name", "label": "Name"},
+                    {"key": "level", "label": "Level"},
+                ],
+                [
+                    {
+                        "code": job_title.code,
+                        "code_url": f"/admin/job-titles/{job_title.id}",
+                        "name": job_title.name,
+                        "level": job_title.hierarchical_level,
+                    }
+                    for job_title in job_titles_summary
+                ],
+            )
+        )
+        if not read_only:
+            fields: list[dict[str, object]] = []
+            for definition in setup_service.DEFAULT_JOB_TITLES:
+                current_job_title = job_title_map.get(definition["code"])
+                fields.extend(
+                    [
+                        _field(name=f"{definition['key']}_name", label=f"{definition['name']} label", value=current_job_title.name if current_job_title else definition["name"], required=True),
+                        _field(name=f"{definition['key']}_hierarchical_level", label=f"{definition['name']} hierarchy level", field_type="number", value=str(current_job_title.hierarchical_level) if current_job_title else str(definition["hierarchical_level"]), required=True),
+                        _field(name=f"{definition['key']}_description", label=f"{definition['name']} description", field_type="textarea", value=current_job_title.description if current_job_title else definition["description"]),
+                    ]
+                )
+            step_form = {
+                "action": _setup_step_url(3),
+                "submit_label": "Save job titles and continue",
+                "title": "Seed the initial job-title catalog",
+                "description": "Codes stay aligned with backend workflow logic. You can still adjust the display names, hierarchy levels, and descriptions.",
+                "fields": fields,
+            }
+    elif step_number == 4:
+        permissions_summary = setup_service.get_permissions_summary()
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "code", "label": "Permission code"},
+                    {"key": "module", "label": "Module"},
+                ],
+                [
+                    {"code": definition["code"], "module": definition["module"]}
+                    for definition in setup_service.DEFAULT_PERMISSIONS
+                ],
+            )
+        )
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "item", "label": "Catalog state"},
+                    {"key": "value", "label": "Value"},
+                ],
+                [
+                    {"item": "Expected permissions", "value": permissions_summary["expected_count"]},
+                    {"item": "Stored permissions", "value": len(permissions_summary["permissions"])},
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": _setup_step_url(4),
+                "submit_label": "Create permission catalog",
+                "title": "Store the permission catalog in the database",
+                "description": "These permission codes back the reusable authorization checks and job-title mappings used by the backend.",
+                "fields": [],
+            }
+    elif step_number == 5:
+        assignment_summary = setup_service.get_job_title_permission_summary()["assignments"]
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "job_title", "label": "Job title"},
+                    {"key": "permissions", "label": "Target permissions"},
+                ],
+                [
+                    {
+                        "job_title": job_title_code,
+                        "permissions": ", ".join(
+                            permission.code for permission in assignment_summary.get(job_title_code, [])
+                        ) or "Not assigned",
+                    }
+                    for job_title_code in setup_service.DEFAULT_JOB_TITLE_PERMISSION_CODES
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": _setup_step_url(5),
+                "submit_label": "Apply job-title permission mapping",
+                "title": "Assign permissions to seeded job titles",
+                "description": "Normal users inherit their effective access from the permissions assigned to their job title. Super admin still bypasses these checks.",
+                "fields": [],
+            }
+    elif step_number == 6:
+        organization_summary = setup_service.get_organization_summary()
+        teams = organization_summary["teams"]
+        operational_users = setup_service.get_operational_users_summary()["employees"]
+        operational_map = {item["role_label"]: item for item in operational_users}
+        fields = []
+        for role_config in setup_service.OPERATIONAL_ROLE_CONFIGS:
+            current_item = operational_map.get(role_config["label"])
+            current_employee = current_item["employee"] if current_item is not None else None
+            current_user = current_item["user"] if current_item is not None else None
+            team_name = "-"
+            if role_config["team_index"] is not None and len(teams) > role_config["team_index"]:
+                team_name = teams[role_config["team_index"]].name
+            help_text = "Must change password on first login."
+            if role_config["team_index"] is not None:
+                help_text = f"Assigned to {team_name}. Must change password on first login."
+            fields.extend(
+                [
+                    _field(name=f"{role_config['key']}_matricule", label=f"{role_config['label']} matricule", value=current_user.matricule if current_user else "", required=True),
+                    _field(name=f"{role_config['key']}_first_name", label=f"{role_config['label']} first name", value=current_user.first_name if current_user else "", required=True),
+                    _field(name=f"{role_config['key']}_last_name", label=f"{role_config['label']} last name", value=current_user.last_name if current_user else "", required=True),
+                    _field(name=f"{role_config['key']}_email", label=f"{role_config['label']} email", field_type="email", value=current_user.email if current_user else "", required=True),
+                    _field(name=f"{role_config['key']}_password", label=f"{role_config['label']} password", field_type="password", value="", required=current_user is None, help_text=help_text),
+                    _field(name=f"{role_config['key']}_hire_date", label=f"{role_config['label']} hire date", field_type="date", value=str(current_employee.hire_date) if current_employee else str(date.today()), required=True),
+                ]
+            )
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "role", "label": "Role"},
+                    {"key": "account", "label": "Current account"},
+                    {"key": "team", "label": "Team"},
+                ],
+                [
+                    {
+                        "role": item["role_label"],
+                        "account": f"{item['user'].matricule} - {item['user'].first_name} {item['user'].last_name}" if item["user"] is not None else "Missing",
+                        "account_url": f"/admin/users/{item['user'].id}" if item["user"] is not None else None,
+                        "team": item["team"].name if item["team"] is not None else "-",
+                    }
+                    for item in operational_users
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": _setup_step_url(6),
+                "submit_label": "Create operational users and continue",
+                "title": "Create the initial operational users",
+                "description": "The wizard creates employee profiles and linked accounts, keeps them active, and forces a password change on the first login.",
+                "fields": fields,
+            }
+    else:
+        review_summary = setup_service.get_review_summary()
+        supporting_tables = _build_setup_summary_tables(service)
+        supporting_tables.append(
+            _table(
+                [
+                    {"key": "item", "label": "Validation"},
+                    {"key": "value", "label": "Result"},
+                ],
+                [
+                    {"item": "Ready to complete installation", "value": "Yes" if review_summary["is_ready"] else "No"},
+                    {
+                        "item": "Missing items",
+                        "value": ", ".join(review_summary["missing_items"]) if review_summary["missing_items"] else "None",
+                    },
+                ],
+            )
+        )
+        if not read_only:
+            step_form = {
+                "action": "/admin/setup-wizard/finish",
+                "submit_label": "Complete installation",
+                "title": "Review and lock the installation",
+                "description": "Initialization becomes true only after this final validation succeeds and the installation state is stored in the main database.",
+                "confirm": "Complete the installation and lock the setup wizard?",
+                "fields": [],
+            }
+
+    return _render(
+        request,
+        "admin/setup_wizard.html",
+        current_admin=current_admin,
+        service=service,
+        page_title=f"Setup Wizard: {setup_step['title']}",
+        page_description="Complete the first-installation flow through safe application-level operations.",
+        wizard_steps=SETUP_WIZARD_STEPS,
+        wizard_current_step=step_number,
+        wizard_step_title=setup_step["title"],
+        wizard_form=step_form,
+        wizard_tables=supporting_tables,
+        wizard_read_only=read_only,
+        wizard_previous_url=_setup_step_url(step_number - 1) if step_number > 1 else None,
+        wizard_next_url=_setup_step_url(step_number + 1) if step_number < 7 else None,
+    )
+
+
+@router.get("/setup-wizard", response_class=HTMLResponse)
+def admin_setup_wizard(
+    request: Request,
+    service: AdminPanelService = Depends(get_admin_panel_service),
+):
+    current_admin = _current_admin(request, service)
+    if current_admin is None:
+        return _redirect_to_login(request)
+
+    return RedirectResponse(
+        url=_setup_step_url(service.setup_service.get_next_wizard_step_number()),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/setup-wizard/step/{step_number}", response_class=HTMLResponse)
+def admin_setup_wizard_step(
+    step_number: int,
+    request: Request,
+    service: AdminPanelService = Depends(get_admin_panel_service),
+):
+    current_admin = _current_admin(request, service)
+    if current_admin is None:
+        return _redirect_to_login(request)
+
+    try:
+        _get_setup_step(step_number)
+    except AdminPanelValidationError as exc:
+        return _redirect_with_message("/admin/setup-wizard", message=str(exc), level="danger")
+
+    return _render_setup_wizard_page(
+        request,
+        service=service,
+        current_admin=current_admin,
+        step_number=step_number,
+    )
+
+
+@router.post("/setup-wizard/step/{step_number}")
+async def admin_setup_wizard_step_submit(
+    step_number: int,
+    request: Request,
+    service: AdminPanelService = Depends(get_admin_panel_service),
+):
+    current_admin = _current_admin(request, service)
+    if current_admin is None:
+        return _redirect_to_login(request)
+
+    form = await request.form()
+    try:
+        _get_setup_step(step_number)
+        service.validate_csrf_token_for_user(_clean(form.get("csrf_token")), current_admin)
+
+        if step_number == 1:
+            service.setup_service.save_readiness_step()
+        elif step_number == 2:
+            service.setup_service.save_organization_step(
+                {
+                    "department_name": _clean(form.get("department_name"), blank_to_none=False),
+                    "department_code": _clean(form.get("department_code"), blank_to_none=False),
+                    "department_description": _clean(form.get("department_description")),
+                    "team_one_name": _clean(form.get("team_one_name"), blank_to_none=False),
+                    "team_one_code": _clean(form.get("team_one_code"), blank_to_none=False),
+                    "team_one_description": _clean(form.get("team_one_description")),
+                    "team_two_name": _clean(form.get("team_two_name"), blank_to_none=False),
+                    "team_two_code": _clean(form.get("team_two_code"), blank_to_none=False),
+                    "team_two_description": _clean(form.get("team_two_description")),
+                }
+            )
+        elif step_number == 3:
+            payload: dict[str, object] = {}
+            for definition in service.setup_service.DEFAULT_JOB_TITLES:
+                key = definition["key"]
+                payload[f"{key}_name"] = _clean(form.get(f"{key}_name"), blank_to_none=False)
+                payload[f"{key}_description"] = _clean(form.get(f"{key}_description"))
+                payload[f"{key}_hierarchical_level"] = _parse_int_value(
+                    _clean(form.get(f"{key}_hierarchical_level"), blank_to_none=False),
+                    f"{definition['name']} hierarchy level",
+                )
+            service.setup_service.save_job_titles_step(payload)
+        elif step_number == 4:
+            service.setup_service.ensure_permission_catalog()
+        elif step_number == 5:
+            service.setup_service.ensure_job_title_permission_assignments()
+        elif step_number == 6:
+            payload = {}
+            for role_config in service.setup_service.OPERATIONAL_ROLE_CONFIGS:
+                role_key = role_config["key"]
+                payload[role_key] = {
+                    "matricule": _clean(form.get(f"{role_key}_matricule"), blank_to_none=False),
+                    "first_name": _clean(form.get(f"{role_key}_first_name"), blank_to_none=False),
+                    "last_name": _clean(form.get(f"{role_key}_last_name"), blank_to_none=False),
+                    "email": _clean(form.get(f"{role_key}_email"), blank_to_none=False),
+                    "password": _clean(form.get(f"{role_key}_password")),
+                    "hire_date": _parse_required_date_value(
+                        _clean(form.get(f"{role_key}_hire_date"), blank_to_none=False),
+                        f"{role_config['label']} hire date",
+                    ),
+                }
+            service.setup_service.save_operational_users_step(payload)
+        else:
+            return _redirect_with_message(
+                "/admin/setup-wizard/step/7",
+                message="Use the final completion button on the review step.",
+                level="warning",
+            )
+    except HANDLED_EXCEPTIONS as exc:
+        return _redirect_with_message(
+            _setup_step_url(step_number),
+            message=str(exc),
+            level="danger",
+        )
+
+    return RedirectResponse(
+        url=_setup_step_url(min(step_number + 1, 7)),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/setup-wizard/finish")
+async def admin_setup_wizard_finish(
+    request: Request,
+    service: AdminPanelService = Depends(get_admin_panel_service),
+):
+    current_admin = _current_admin(request, service)
+    if current_admin is None:
+        return _redirect_to_login(request)
+
+    form = await request.form()
+    try:
+        service.validate_csrf_token_for_user(_clean(form.get("csrf_token")), current_admin)
+        service.setup_service.complete_installation(current_admin)
+    except HANDLED_EXCEPTIONS as exc:
+        return _redirect_with_message(
+            "/admin/setup-wizard/step/7",
+            message=str(exc),
+            level="danger",
+        )
+
+    return _redirect_with_message(
+        "/admin",
+        message="Installation completed successfully. The setup state is now locked.",
+        level="success",
     )
 
 

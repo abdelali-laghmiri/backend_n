@@ -421,15 +421,9 @@ class PerformanceService:
             return True
 
         permissions_service = PermissionsService(self.db)
-        return (
-            permissions_service.user_has_permission(
-                current_user,
-                self.PERFORMANCE_READ_PERMISSION,
-            )
-            or permissions_service.user_has_permission(
-                current_user,
-                self.PERFORMANCE_MANAGE_PERMISSION,
-            )
+        return permissions_service.user_has_permission(
+            current_user,
+            self.PERFORMANCE_MANAGE_PERMISSION,
         )
 
     def _get_leader_team_ids(self, user_id: int) -> set[int]:

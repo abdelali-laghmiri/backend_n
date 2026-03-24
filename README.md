@@ -39,6 +39,7 @@ Open the application after startup:
 - Health endpoint: `http://localhost:8000/health`
 - Setup status endpoint: `http://localhost:8000/api/v1/setup/status`
 - Internal admin dashboard login: `http://localhost:8000/admin/login`
+- Internal setup wizard: `http://localhost:8000/admin/setup-wizard`
 
 ## Run With Docker And PostgreSQL
 
@@ -99,7 +100,21 @@ python -m alembic current
 
 ## System Initialization
 
-The system starts uninitialized. Initialization is allowed only once and creates the first technical super admin from `.env`.
+The system now has a two-phase first-installation flow backed by the main application database.
+
+Phase 1 bootstrap:
+
+- `POST /api/v1/setup/initialize` creates the first technical super admin from `.env`.
+- This bootstrap step does **not** mark the system as initialized.
+- It only prepares the super admin account required to access the internal admin setup wizard.
+
+Phase 2 installation wizard:
+
+- The super admin signs in to the internal admin dashboard.
+- The real setup wizard runs at `http://localhost:8000/admin/setup-wizard`.
+- The wizard creates the minimum initial operational data in the database.
+- Only when the final wizard finish action succeeds does `installation_state.is_initialized` become `true`.
+- After that point, the installation is locked and normal setup completion cannot run again.
 
 Required bootstrap variables:
 
@@ -109,19 +124,36 @@ Required bootstrap variables:
 - `SUPERADMIN_LAST_NAME`
 - `SUPERADMIN_EMAIL`
 
-Check whether the system is already initialized:
+Check the current setup state:
 
 ```powershell
 Invoke-RestMethod -Method Get -Uri "http://localhost:8000/api/v1/setup/status"
 ```
 
-Initialize the system and create the first super admin:
+Bootstrap the first super admin:
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/v1/setup/initialize"
 ```
 
-After a successful initialization, calling `POST /api/v1/setup/initialize` again returns a conflict response.
+Expected bootstrap behavior:
+
+- `initialized` remains `false` after this API call.
+- `bootstrap_super_admin_exists` becomes `true`.
+- `setup_wizard_required` remains `true`.
+- Repeating `POST /api/v1/setup/initialize` after the bootstrap super admin exists returns a conflict response.
+
+The setup wizard creates this minimum data before the installation can be completed:
+
+- 1 department
+- 2 teams linked to that department
+- 4 initial operational users through employee-linked accounts:
+  - 1 RH Manager
+  - 1 Department Manager
+  - 2 Team Leaders
+- Required job titles
+- Required permission catalog entries
+- Job-title permission assignments stored in the database
 
 ## Authentication
 
@@ -366,7 +398,14 @@ The permissions module provides the access-control foundation for the rest of th
 - Super admin bypasses all permission checks.
 - Normal users receive effective permissions through their employee job title.
 - Permissions are assigned to job titles, not directly to users.
-- Permission-management endpoints are restricted to the super admin in this first version.
+- Permission catalog entries and job-title assignments are stored in the database.
+- Route protection uses the reusable `require_permission("module.action")` dependency.
+- Effective permissions are resolved live from the authenticated user's active employee profile and job title.
+- Permission-management endpoints are now protected by database permission codes with automatic super-admin bypass:
+  - `permissions.read`
+  - `permissions.create`
+  - `permissions.update`
+  - `permissions.assign`
 
 Create a permission:
 
@@ -438,7 +477,10 @@ The requests module provides a database-driven workflow engine for HR requests.
 
 - Request types, fields, and workflow steps are configured in the database.
 - Configuration endpoints require `requests.manage` with super-admin bypass.
-- Request submission requires an authenticated active user linked to an active employee profile.
+- Request submission requires `requests.create`.
+- Request list/detail routes require `requests.read`.
+- Request approval and rejection require `requests.approve`.
+- The service still enforces workflow visibility and approver rules on top of those permissions.
 - Workflow approver steps currently support `TEAM_LEADER`, `DEPARTMENT_MANAGER`, and `RH_MANAGER`.
 - `RH_MANAGER` currently resolves the first active employee whose job title code is `RH_MANAGER`.
 - Conception steps are supported and completed automatically by the workflow engine in this first version.
@@ -824,9 +866,10 @@ The performance module provides simple team-based daily performance tracking.
   - Example: `85.0` means 85 percent.
   - Values above `100.0` are allowed when the achieved value exceeds the objective.
 - Objective management is admin-oriented and protected by `performance.manage`.
-- Performance read endpoints require authentication.
-  - Super admin and users with `performance.read` or `performance.manage` can read all teams.
-  - Other authenticated users can read only the teams they lead.
+- Daily performance submission requires `performance.create` and still validates that the caller is the configured team leader or the super admin.
+- Performance read endpoints require `performance.read`.
+  - Super admin and users with `performance.manage` can read all teams.
+  - Users with `performance.read` but without `performance.manage` can read only the teams they lead.
 - Daily performance submission requires an authenticated user who is either:
   - the configured team leader
   - or the super admin
@@ -926,10 +969,10 @@ The dashboard module is a read-only aggregation layer on top of the existing emp
 - It does not create or modify business data.
 - It exposes frontend-friendly summary endpoints for overview pages, widgets, and chart data.
 - It supports practical filters such as `date`, `date_from`, `date_to`, `team_id`, and `department_id` where relevant.
-- All dashboard endpoints require an authenticated user.
+- All dashboard endpoints require `dashboard.read` with super-admin bypass.
 - Super admin always gets full dashboard scope.
-- Users with `dashboard.read` or `dashboard.manage` also get full dashboard scope.
-- Other authenticated users receive a limited scope:
+- Users with `dashboard.manage` also get full dashboard scope.
+- Users with `dashboard.read` but without `dashboard.manage` receive a limited scope:
   - requests: their own requests, requests they currently need to approve, and requests from teams they lead
   - attendance and employees: their own employee scope and teams they lead
   - performance: only teams they lead
@@ -987,18 +1030,38 @@ The internal admin dashboard is a server-rendered control panel for the technica
 - It manages business data through safe application-level forms and read-only inspection pages.
 - It uses a dedicated cookie-based admin session on top of the existing authentication accounts.
 - Only active `is_super_admin=true` accounts can sign in.
+- If the installation is not complete yet, the super admin is redirected to the setup wizard after login.
+- The setup wizard is persisted in the main database through the `installation_state` table.
+- The wizard can still be reviewed after completion, but all write actions are locked.
 
 Main access points:
 
 - Login page: `http://localhost:8000/admin/login`
 - Dashboard home: `http://localhost:8000/admin`
+- Setup wizard home: `http://localhost:8000/admin/setup-wizard`
 
 How login works:
 
-- Initialize the system first through the setup module if no super admin exists yet.
+- Bootstrap the first super admin through `POST /api/v1/setup/initialize` if no super admin exists yet.
 - Sign in on `/admin/login` with the existing super admin matricule and password.
 - The admin dashboard stores a signed HttpOnly cookie scoped to `/admin`.
 - The public API keeps using bearer tokens and is not replaced by the admin session.
+
+Setup wizard flow:
+
+- Step 1: system readiness
+- Step 2: create the first department and two teams
+- Step 3: create the initial job titles
+- Step 4: create the permission catalog in the database
+- Step 5: assign permissions to the seeded job titles
+- Step 6: create the four initial operational users through employee-linked accounts
+- Step 7: review and complete the installation
+
+The installation becomes initialized only at this point:
+
+- `POST /admin/setup-wizard/finish`
+- This route validates that the minimum required setup data exists first.
+- Only then does it set `installation_state.is_initialized = true`, `initialized_at`, and `initialized_by_user_id`.
 
 Main admin sections:
 
@@ -1023,6 +1086,8 @@ Practical usage notes:
 - Request pages are inspection-focused and expose submitted values, current workflow step, workflow progress, and action history.
 - Attendance pages are inspection-focused and allow monthly report generation.
 - Performance pages allow objective management and daily record submission.
+- The setup wizard creates the minimum first-install data and then hands off day-to-day administration to the main sections listed above.
+- Operational users created in the wizard keep `must_change_password = true` and must change their password after the first successful API login.
 
 Open the admin dashboard after the API is running:
 
