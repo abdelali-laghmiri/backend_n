@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.apps.permissions.dependencies import require_any_permission, require_permission
 from app.apps.requests.dependencies import get_requests_service
 from app.apps.requests.schemas import (
+    RequestApprovalHistoryResponse,
     RequestCreateRequest,
     RequestDetailResponse,
     RequestStepActionRequest,
@@ -338,6 +339,30 @@ def list_pending_approvals(
 ) -> list[RequestSummaryResponse]:
     workflow_requests = service.list_pending_approvals_for_user(current_user)
     return service.build_request_summaries(workflow_requests)
+
+
+@router.get(
+    "/my-approval-history",
+    response_model=list[RequestApprovalHistoryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List request actions personally performed by the authenticated approver",
+    description=(
+        "Return only approval or rejection workflow actions personally performed "
+        "by the authenticated user. This endpoint does not return all requests, "
+        "all department requests, or all system history."
+    ),
+)
+def list_my_approval_history(
+    service: RequestsService = Depends(get_requests_service),
+    current_user: User = Depends(
+        require_any_permission(
+            "requests.read_my_approvals",
+            "requests.manage",
+            "requests.read_all",
+        )
+    ),
+) -> list[RequestApprovalHistoryResponse]:
+    return service.list_approval_history_for_user(current_user)
 
 
 @router.get(

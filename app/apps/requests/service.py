@@ -33,6 +33,7 @@ from app.apps.requests.models import (
 )
 from app.apps.requests.schemas import (
     LeaveRequestDetailsResponse,
+    RequestApprovalHistoryResponse,
     RequestActionHistoryResponse,
     RequestCreateRequest,
     RequestCurrentStepResponse,
@@ -70,6 +71,10 @@ class RequestsService:
     """Service layer for the dynamic requests engine."""
 
     RH_MANAGER_JOB_TITLE_CODE = "RH_MANAGER"
+    APPROVAL_HISTORY_ACTIONS = (
+        RequestActionEnum.APPROVED.value,
+        RequestActionEnum.REJECTED.value,
+    )
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -463,6 +468,85 @@ class RequestsService:
             )
         )
         return list(self.db.execute(statement).scalars().all())
+
+    def list_approval_history_for_user(
+        self,
+        current_user: User,
+    ) -> list[RequestApprovalHistoryResponse]:
+        """List approval or rejection actions personally performed by the user."""
+
+        statement = (
+            select(
+                RequestActionHistory.id.label("action_history_id"),
+                RequestActionHistory.request_id,
+                RequestActionHistory.step_id,
+                RequestActionHistory.step_name,
+                RequestActionHistory.step_order,
+                RequestActionHistory.step_kind,
+                RequestActionHistory.resolver_type,
+                RequestActionHistory.action,
+                RequestActionHistory.comment,
+                RequestActionHistory.created_at.label("acted_at"),
+                WorkflowRequest.request_type_id,
+                WorkflowRequest.requester_user_id,
+                WorkflowRequest.requester_employee_id,
+                WorkflowRequest.status.label("request_status"),
+                WorkflowRequest.submitted_at,
+                WorkflowRequest.completed_at,
+                RequestType.code.label("request_type_code"),
+                RequestType.name.label("request_type_name"),
+                Employee.matricule.label("requester_matricule"),
+                Employee.first_name.label("requester_first_name"),
+                Employee.last_name.label("requester_last_name"),
+            )
+            .select_from(RequestActionHistory)
+            .join(WorkflowRequest, WorkflowRequest.id == RequestActionHistory.request_id)
+            .join(RequestType, RequestType.id == WorkflowRequest.request_type_id)
+            .join(Employee, Employee.id == WorkflowRequest.requester_employee_id)
+            .where(
+                RequestActionHistory.actor_user_id == current_user.id,
+                RequestActionHistory.action.in_(self.APPROVAL_HISTORY_ACTIONS),
+                RequestActionHistory.step_kind == RequestStepKindEnum.APPROVER.value,
+            )
+            .order_by(RequestActionHistory.created_at.desc(), RequestActionHistory.id.desc())
+        )
+        rows = self.db.execute(statement).all()
+
+        return [
+            RequestApprovalHistoryResponse(
+                action_history_id=row.action_history_id,
+                request_id=row.request_id,
+                request_type_id=row.request_type_id,
+                request_type_code=row.request_type_code,
+                request_type_name=row.request_type_name,
+                requester_user_id=row.requester_user_id,
+                requester_employee_id=row.requester_employee_id,
+                requester_name=(
+                    f"{row.requester_first_name} {row.requester_last_name}"
+                ),
+                requester_matricule=row.requester_matricule,
+                request_status=RequestStatusEnum(row.request_status),
+                submitted_at=row.submitted_at,
+                completed_at=row.completed_at,
+                acted_at=row.acted_at,
+                action=RequestActionEnum(row.action),
+                step_id=row.step_id,
+                step_name=row.step_name,
+                step_order=row.step_order,
+                step_kind=(
+                    RequestStepKindEnum(row.step_kind)
+                    if row.step_kind is not None
+                    else None
+                ),
+                resolver_type=(
+                    RequestResolverTypeEnum(row.resolver_type)
+                    if row.resolver_type is not None
+                    else None
+                ),
+                comment=row.comment,
+            )
+            for row in rows
+        ]
 
     def get_request_for_user(
         self,

@@ -306,6 +306,31 @@ class RequestActionHistoryResponse(BaseModel):
     created_at: datetime
 
 
+class RequestApprovalHistoryResponse(BaseModel):
+    """Approval-history item scoped to actions personally performed by the user."""
+
+    action_history_id: int
+    request_id: int
+    request_type_id: int
+    request_type_code: str
+    request_type_name: str
+    requester_user_id: int
+    requester_employee_id: int
+    requester_name: str
+    requester_matricule: str
+    request_status: RequestStatusEnum
+    submitted_at: datetime
+    completed_at: datetime | None
+    acted_at: datetime
+    action: RequestActionEnum
+    step_id: int | None
+    step_name: str | None
+    step_order: int | None
+    step_kind: RequestStepKindEnum | None
+    resolver_type: RequestResolverTypeEnum | None
+    comment: str | None
+
+
 class RequestWorkflowProgressResponse(BaseModel):
     """Computed workflow-progress state for a request step."""
 
