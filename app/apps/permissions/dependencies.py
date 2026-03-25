@@ -45,3 +45,28 @@ def require_permission(permission_code: str) -> Callable[[User, PermissionsServi
         )
 
     return dependency
+
+
+def require_any_permission(
+    *permission_codes: str,
+) -> Callable[[User, PermissionsService], User]:
+    """Require at least one permission code with automatic super-admin bypass."""
+
+    if not permission_codes:
+        raise ValueError("At least one permission code is required.")
+
+    def dependency(
+        current_user: User = Depends(get_current_active_user),
+        permissions_service: PermissionsService = Depends(get_permissions_service),
+    ) -> User:
+        for permission_code in permission_codes:
+            if permissions_service.user_has_permission(current_user, permission_code):
+                return current_user
+
+        required_permissions = ", ".join(f"'{code}'" for code in permission_codes)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"One of permissions {required_permissions} is required.",
+        )
+
+    return dependency

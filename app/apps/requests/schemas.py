@@ -332,6 +332,8 @@ class RequestSummaryResponse(BaseModel):
     request_type_name: str
     requester_user_id: int
     requester_employee_id: int
+    requester_name: str
+    requester_matricule: str
     status: RequestStatusEnum
     current_step: RequestCurrentStepResponse | None
     submitted_at: datetime

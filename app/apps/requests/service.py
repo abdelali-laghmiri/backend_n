@@ -444,6 +444,26 @@ class RequestsService:
         )
         return list(self.db.execute(statement).scalars().all())
 
+    def list_pending_approvals_for_user(self, current_user: User) -> list[WorkflowRequest]:
+        """List in-progress requests currently assigned to the authenticated approver."""
+
+        statement = (
+            select(WorkflowRequest)
+            .join(RequestWorkflowStep, RequestWorkflowStep.id == WorkflowRequest.current_step_id)
+            .where(
+                WorkflowRequest.status == RequestStatusEnum.IN_PROGRESS.value,
+                WorkflowRequest.current_step_id.is_not(None),
+                WorkflowRequest.current_approver_user_id == current_user.id,
+                RequestWorkflowStep.step_kind == RequestStepKindEnum.APPROVER.value,
+            )
+            .order_by(
+                WorkflowRequest.submitted_at.desc(),
+                WorkflowRequest.created_at.desc(),
+                WorkflowRequest.id.desc(),
+            )
+        )
+        return list(self.db.execute(statement).scalars().all())
+
     def get_request_for_user(
         self,
         request_id: int,
@@ -541,13 +561,19 @@ class RequestsService:
         if not workflow_requests:
             return []
 
-        request_types_by_id, steps_by_id, users_by_id = self._load_summary_maps(workflow_requests)
+        (
+            request_types_by_id,
+            steps_by_id,
+            users_by_id,
+            employees_by_id,
+        ) = self._load_summary_maps(workflow_requests)
         return [
             self._build_request_summary(
                 workflow_request,
                 request_types_by_id=request_types_by_id,
                 steps_by_id=steps_by_id,
                 users_by_id=users_by_id,
+                employees_by_id=employees_by_id,
             )
             for workflow_request in workflow_requests
         ]
@@ -556,6 +582,7 @@ class RequestsService:
         """Build a detailed response for a single request."""
 
         request_type = self.get_request_type(workflow_request.request_type_id)
+        requester_employee = self._get_requester_employee(workflow_request.requester_employee_id)
         current_step = (
             self.get_workflow_step(workflow_request.current_step_id)
             if workflow_request.current_step_id is not None
@@ -617,6 +644,7 @@ class RequestsService:
                     if current_approver is not None
                     else {}
                 ),
+                employees_by_id={requester_employee.id: requester_employee},
             ).model_dump(),
             submitted_values=[
                 RequestFieldValueResponse.model_validate(field_value)
@@ -681,10 +709,15 @@ class RequestsService:
         request_types_by_id: dict[int, RequestType],
         steps_by_id: dict[int, RequestWorkflowStep],
         users_by_id: dict[int, User],
+        employees_by_id: dict[int, Employee],
     ) -> RequestSummaryResponse:
         """Build a summary response for a request instance."""
 
         request_type = request_types_by_id[workflow_request.request_type_id]
+        requester_employee = employees_by_id.get(workflow_request.requester_employee_id)
+        if requester_employee is None:
+            requester_employee = self._get_requester_employee(workflow_request.requester_employee_id)
+
         current_step = (
             steps_by_id.get(workflow_request.current_step_id)
             if workflow_request.current_step_id is not None
@@ -703,6 +736,10 @@ class RequestsService:
             request_type_name=request_type.name,
             requester_user_id=workflow_request.requester_user_id,
             requester_employee_id=workflow_request.requester_employee_id,
+            requester_name=(
+                f"{requester_employee.first_name} {requester_employee.last_name}"
+            ),
+            requester_matricule=requester_employee.matricule,
             status=RequestStatusEnum(workflow_request.status),
             current_step=(
                 self._build_current_step_response(current_step, current_approver)
@@ -1380,10 +1417,18 @@ class RequestsService:
     def _load_summary_maps(
         self,
         workflow_requests: list[WorkflowRequest],
-    ) -> tuple[dict[int, RequestType], dict[int, RequestWorkflowStep], dict[int, User]]:
-        """Load the supporting request-type, step, and user maps for summaries."""
+    ) -> tuple[
+        dict[int, RequestType],
+        dict[int, RequestWorkflowStep],
+        dict[int, User],
+        dict[int, Employee],
+    ]:
+        """Load the supporting request-type, step, user, and employee maps for summaries."""
 
         request_type_ids = {workflow_request.request_type_id for workflow_request in workflow_requests}
+        requester_employee_ids = {
+            workflow_request.requester_employee_id for workflow_request in workflow_requests
+        }
         step_ids = {
             workflow_request.current_step_id
             for workflow_request in workflow_requests
@@ -1414,11 +1459,13 @@ class RequestsService:
             else []
         )
         users = self._get_users_by_ids(user_ids)
+        employees = self._get_employees_by_ids(requester_employee_ids)
 
         return (
             {request_type.id: request_type for request_type in request_types},
             {step.id: step for step in steps},
             users,
+            employees,
         )
 
     def _get_users_by_ids(self, user_ids: set[int]) -> dict[int, User]:
@@ -1431,6 +1478,19 @@ class RequestsService:
             self.db.execute(select(User).where(User.id.in_(user_ids))).scalars().all()
         )
         return {user.id: user for user in users}
+
+    def _get_employees_by_ids(self, employee_ids: set[int]) -> dict[int, Employee]:
+        """Load employees in bulk by id."""
+
+        if not employee_ids:
+            return {}
+
+        employees = list(
+            self.db.execute(select(Employee).where(Employee.id.in_(employee_ids)))
+            .scalars()
+            .all()
+        )
+        return {employee.id: employee for employee in employees}
 
     def _validate_step_configuration(
         self,

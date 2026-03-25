@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.apps.permissions.dependencies import require_permission
+from app.apps.permissions.dependencies import require_any_permission, require_permission
 from app.apps.requests.dependencies import get_requests_service
 from app.apps.requests.schemas import (
     RequestCreateRequest,
@@ -316,6 +316,27 @@ def list_my_requests(
     current_user: User = Depends(require_permission("requests.read")),
 ) -> list[RequestSummaryResponse]:
     workflow_requests = service.list_requests_for_user(current_user)
+    return service.build_request_summaries(workflow_requests)
+
+
+@router.get(
+    "/pending-approvals",
+    response_model=list[RequestSummaryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List requests currently assigned to the authenticated approver",
+    description=(
+        "Return only in-progress requests whose current approver step is assigned "
+        "to the authenticated user. This endpoint is separate from the current "
+        "user's own submitted request list."
+    ),
+)
+def list_pending_approvals(
+    service: RequestsService = Depends(get_requests_service),
+    current_user: User = Depends(
+        require_any_permission("requests.approve", "requests.manage")
+    ),
+) -> list[RequestSummaryResponse]:
+    workflow_requests = service.list_pending_approvals_for_user(current_user)
     return service.build_request_summaries(workflow_requests)
 
 
