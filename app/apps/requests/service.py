@@ -8,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.apps.employees.models import Employee
+from app.apps.notifications.models import Notification, NotificationTypeEnum
+from app.apps.notifications.service import NotificationsService
 from app.apps.organization.models import Department, JobTitle, Team
 from app.apps.permissions.service import PermissionsService
 from app.apps.requests.leave_business import (
@@ -411,6 +413,8 @@ class RequestsService:
             rejection_reason=None,
         )
         self.db.add(workflow_request)
+        notifications_service = NotificationsService(self.db)
+        pending_notifications: list[Notification] = []
 
         try:
             self.db.flush()
@@ -427,6 +431,13 @@ class RequestsService:
                 requester_employee=requester_employee,
                 start_after_order=None,
             )
+            self._queue_submission_notifications(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                workflow_request=workflow_request,
+                request_type=request_type,
+                requester_employee=requester_employee,
+            )
             self.db.add(workflow_request)
             self.db.commit()
         except (RequestsValidationError, RequestsNotFoundError, RequestsAuthorizationError):
@@ -437,6 +448,10 @@ class RequestsService:
             raise RequestsConflictError("Failed to create the request.") from exc
 
         self.db.refresh(workflow_request)
+        self._publish_pending_notifications(
+            notifications_service=notifications_service,
+            notifications=pending_notifications,
+        )
         return workflow_request
 
     def list_requests_for_user(self, current_user: User) -> list[WorkflowRequest]:
@@ -572,6 +587,9 @@ class RequestsService:
         self._ensure_request_actionable_by_user(workflow_request, current_user)
         requester_employee = self._get_requester_employee(workflow_request.requester_employee_id)
         current_step = self.get_workflow_step(workflow_request.current_step_id)
+        request_type = self.get_request_type(workflow_request.request_type_id)
+        notifications_service = NotificationsService(self.db)
+        pending_notifications: list[Notification] = []
 
         try:
             self._record_history(
@@ -586,6 +604,13 @@ class RequestsService:
                 requester_employee=requester_employee,
                 start_after_order=current_step.step_order,
             )
+            self._queue_post_approval_notifications(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                workflow_request=workflow_request,
+                request_type=request_type,
+                requester_employee=requester_employee,
+            )
             self.db.add(workflow_request)
             self.db.commit()
         except (RequestsValidationError, RequestsNotFoundError, RequestsAuthorizationError):
@@ -596,6 +621,10 @@ class RequestsService:
             raise RequestsConflictError("Failed to approve the request step.") from exc
 
         self.db.refresh(workflow_request)
+        self._publish_pending_notifications(
+            notifications_service=notifications_service,
+            notifications=pending_notifications,
+        )
         return workflow_request
 
     def reject_current_step(
@@ -610,6 +639,9 @@ class RequestsService:
         workflow_request = self._get_request(request_id)
         self._ensure_request_actionable_by_user(workflow_request, current_user)
         current_step = self.get_workflow_step(workflow_request.current_step_id)
+        request_type = self.get_request_type(workflow_request.request_type_id)
+        notifications_service = NotificationsService(self.db)
+        pending_notifications: list[Notification] = []
 
         try:
             self._record_history(
@@ -624,6 +656,12 @@ class RequestsService:
             workflow_request.current_approver_user_id = None
             workflow_request.completed_at = utcnow()
             workflow_request.rejection_reason = comment
+            self._queue_rejection_notifications(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                workflow_request=workflow_request,
+                request_type=request_type,
+            )
             self.db.add(workflow_request)
             self.db.commit()
         except (RequestsValidationError, RequestsNotFoundError, RequestsAuthorizationError):
@@ -634,6 +672,10 @@ class RequestsService:
             raise RequestsConflictError("Failed to reject the request step.") from exc
 
         self.db.refresh(workflow_request)
+        self._publish_pending_notifications(
+            notifications_service=notifications_service,
+            notifications=pending_notifications,
+        )
         return workflow_request
 
     def build_request_summaries(
@@ -1319,6 +1361,152 @@ class RequestsService:
             .limit(1)
         )
         return self.db.execute(statement).scalar_one_or_none()
+
+    def _queue_submission_notifications(
+        self,
+        *,
+        notifications_service: NotificationsService,
+        pending_notifications: list[Notification],
+        workflow_request: WorkflowRequest,
+        request_type: RequestType,
+        requester_employee: Employee,
+    ) -> None:
+        """Queue notifications triggered when a request is first submitted."""
+
+        if workflow_request.current_approver_user_id is not None:
+            self._queue_request_notification(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                recipient_user_id=workflow_request.current_approver_user_id,
+                notification_type=NotificationTypeEnum.REQUEST_ASSIGNED,
+                title="Nouvelle demande a traiter",
+                message=(
+                    f"La demande '{request_type.name}' de "
+                    f"{requester_employee.first_name} {requester_employee.last_name} "
+                    "necessite votre decision."
+                ),
+                request_id=workflow_request.id,
+            )
+            return
+
+        if workflow_request.status == RequestStatusEnum.APPROVED.value:
+            self._queue_request_notification(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                recipient_user_id=workflow_request.requester_user_id,
+                notification_type=NotificationTypeEnum.REQUEST_APPROVED,
+                title="Demande approuvee",
+                message=f"Votre demande '{request_type.name}' a ete approuvee.",
+                request_id=workflow_request.id,
+            )
+
+    def _queue_post_approval_notifications(
+        self,
+        *,
+        notifications_service: NotificationsService,
+        pending_notifications: list[Notification],
+        workflow_request: WorkflowRequest,
+        request_type: RequestType,
+        requester_employee: Employee,
+    ) -> None:
+        """Queue notifications triggered after an approval action."""
+
+        if workflow_request.current_approver_user_id is not None:
+            self._queue_request_notification(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                recipient_user_id=workflow_request.current_approver_user_id,
+                notification_type=NotificationTypeEnum.REQUEST_ASSIGNED,
+                title="Nouvelle demande a traiter",
+                message=(
+                    f"La demande '{request_type.name}' de "
+                    f"{requester_employee.first_name} {requester_employee.last_name} "
+                    "necessite votre decision."
+                ),
+                request_id=workflow_request.id,
+            )
+            self._queue_request_notification(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                recipient_user_id=workflow_request.requester_user_id,
+                notification_type=NotificationTypeEnum.REQUEST_STEP_UPDATED,
+                title="Demande transmise a l'etape suivante",
+                message=(
+                    f"Votre demande '{request_type.name}' a ete approuvee "
+                    "et transmise a l'etape suivante."
+                ),
+                request_id=workflow_request.id,
+            )
+            return
+
+        if workflow_request.status == RequestStatusEnum.APPROVED.value:
+            self._queue_request_notification(
+                notifications_service=notifications_service,
+                pending_notifications=pending_notifications,
+                recipient_user_id=workflow_request.requester_user_id,
+                notification_type=NotificationTypeEnum.REQUEST_APPROVED,
+                title="Demande approuvee",
+                message=f"Votre demande '{request_type.name}' a ete approuvee.",
+                request_id=workflow_request.id,
+            )
+
+    def _queue_rejection_notifications(
+        self,
+        *,
+        notifications_service: NotificationsService,
+        pending_notifications: list[Notification],
+        workflow_request: WorkflowRequest,
+        request_type: RequestType,
+    ) -> None:
+        """Queue notifications triggered after a rejection action."""
+
+        self._queue_request_notification(
+            notifications_service=notifications_service,
+            pending_notifications=pending_notifications,
+            recipient_user_id=workflow_request.requester_user_id,
+            notification_type=NotificationTypeEnum.REQUEST_REJECTED,
+            title="Demande rejetee",
+            message=f"Votre demande '{request_type.name}' a ete rejetee.",
+            request_id=workflow_request.id,
+        )
+
+    def _queue_request_notification(
+        self,
+        *,
+        notifications_service: NotificationsService,
+        pending_notifications: list[Notification],
+        recipient_user_id: int | None,
+        notification_type: NotificationTypeEnum,
+        title: str,
+        message: str,
+        request_id: int,
+    ) -> None:
+        """Queue a request-related notification inside the current transaction."""
+
+        if recipient_user_id is None:
+            return
+
+        notification = notifications_service.create_notification(
+            recipient_user_id=recipient_user_id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            target_url=f"/requests/{request_id}",
+            commit=False,
+            publish_realtime=False,
+        )
+        pending_notifications.append(notification)
+
+    def _publish_pending_notifications(
+        self,
+        *,
+        notifications_service: NotificationsService,
+        notifications: list[Notification],
+    ) -> None:
+        """Publish committed notifications to connected websocket clients."""
+
+        for notification in notifications:
+            notifications_service.publish_realtime_notification(notification)
 
     def _record_history(
         self,

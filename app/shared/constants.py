@@ -28,6 +28,10 @@ API_TAGS = [
         "description": "Access control and authorization management endpoints.",
     },
     {
+        "name": "Notifications",
+        "description": "Internal user notifications and realtime delivery endpoints.",
+    },
+    {
         "name": "Requests",
         "description": "Employee request and approval workflow endpoints.",
     },
