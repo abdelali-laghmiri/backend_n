@@ -53,24 +53,24 @@ job_title_permissions_table = sa.table(
 )
 
 
+def _get_permission_id(bind) -> int | None:
+    """Return the seeded permission id by unique code."""
+
+    return bind.execute(
+        sa.select(permissions_table.c.id)
+        .where(permissions_table.c.code == PERMISSION_CODE)
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     now = datetime.now(timezone.utc)
 
-    permission_row = (
-        bind.execute(
-            sa.select(
-                permissions_table.c.id,
-            )
-            .where(permissions_table.c.code == PERMISSION_CODE)
-            .limit(1)
-        )
-        .mappings()
-        .first()
-    )
+    permission_id = _get_permission_id(bind)
 
-    if permission_row is None:
-        result = bind.execute(
+    if permission_id is None:
+        bind.execute(
             sa.insert(permissions_table).values(
                 code=PERMISSION_CODE,
                 name=PERMISSION_NAME,
@@ -81,9 +81,14 @@ def upgrade() -> None:
                 updated_at=now,
             )
         )
-        permission_id = result.inserted_primary_key[0]
+        # Some Alembic/driver combinations do not populate inserted_primary_key
+        # for ad hoc Core inserts here, so reload by the unique code instead.
+        permission_id = _get_permission_id(bind)
+        if permission_id is None:
+            raise RuntimeError(
+                f"Failed to load permission '{PERMISSION_CODE}' after insert."
+            )
     else:
-        permission_id = permission_row["id"]
         bind.execute(
             sa.update(permissions_table)
             .where(permissions_table.c.id == permission_id)
@@ -125,11 +130,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    permission_id = bind.execute(
-        sa.select(permissions_table.c.id)
-        .where(permissions_table.c.code == PERMISSION_CODE)
-        .limit(1)
-    ).scalar_one_or_none()
+    permission_id = _get_permission_id(bind)
     if permission_id is None:
         return
 
