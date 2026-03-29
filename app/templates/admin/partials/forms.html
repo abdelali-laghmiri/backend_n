@@ -9,7 +9,8 @@
     </div>
     {% endif %}
     <div class="card-body">
-        <form action="{{ form.action }}" method="{{ form.method or 'post' }}" {% if form.confirm %}data-confirm="{{ form.confirm }}"{% endif %}>
+        {% set has_file_fields = form.fields | selectattr('type', 'equalto', 'file') | list %}
+        <form action="{{ form.action }}" method="{{ form.method or 'post' }}" {% if form.confirm %}data-confirm="{{ form.confirm }}"{% endif %} {% if has_file_fields %}enctype="multipart/form-data"{% endif %}>
             {% if (form.method or 'post')|lower != 'get' and csrf_token %}
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             {% endif %}
@@ -39,6 +40,14 @@
                         </option>
                         {% endfor %}
                     </select>
+                    {% elif field.type == 'file' %}
+                    <input
+                        class="form-control"
+                        type="file"
+                        name="{{ field.name }}"
+                        {% if field.accept %}accept="{{ field.accept }}"{% endif %}
+                        {% if field.required %}required{% endif %}
+                    >
                     {% else %}
                     <input
                         class="form-control"

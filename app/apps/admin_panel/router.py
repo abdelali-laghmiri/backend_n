@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile
 
 from app.apps.admin_panel.dependencies import get_admin_panel_service
 from app.apps.admin_panel.schemas import AdminUserCreateRequest, AdminUserUpdateRequest
@@ -92,6 +94,17 @@ from app.apps.users.models import User
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
+STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
+EMPLOYEE_IMAGE_UPLOADS_DIR = STATIC_DIR / "uploads" / "employees"
+EMPLOYEE_IMAGE_URL_PREFIX = "/static/uploads/employees"
+EMPLOYEE_IMAGE_ALLOWED_CONTENT_TYPES = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+EMPLOYEE_IMAGE_ALLOWED_SUFFIXES = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
+EMPLOYEE_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 
 HANDLED_EXCEPTIONS = (
     AdminPanelAuthenticationError,
@@ -316,6 +329,7 @@ def _field(
     options: list[dict[str, str]] | None = None,
     help_text: str | None = None,
     rows: int | None = None,
+    accept: str | None = None,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -326,7 +340,56 @@ def _field(
         "options": options or [],
         "help_text": help_text,
         "rows": rows,
+        "accept": accept,
     }
+
+
+async def _save_employee_image_upload(upload: object | None) -> str | None:
+    if upload is None or not isinstance(upload, UploadFile):
+        return None
+
+    if not upload.filename:
+        await upload.close()
+        return None
+
+    content_type = (upload.content_type or "").lower()
+    if content_type not in EMPLOYEE_IMAGE_ALLOWED_CONTENT_TYPES:
+        await upload.close()
+        raise AdminPanelValidationError(
+            "Employee image must be a JPG, PNG, WEBP, or GIF file."
+        )
+
+    file_bytes = await upload.read(EMPLOYEE_IMAGE_MAX_BYTES + 1)
+    await upload.close()
+
+    if not file_bytes:
+        raise AdminPanelValidationError("Employee image upload cannot be empty.")
+
+    if len(file_bytes) > EMPLOYEE_IMAGE_MAX_BYTES:
+        raise AdminPanelValidationError("Employee image must be 5 MB or smaller.")
+
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in EMPLOYEE_IMAGE_ALLOWED_SUFFIXES:
+        suffix = EMPLOYEE_IMAGE_ALLOWED_CONTENT_TYPES[content_type]
+
+    EMPLOYEE_IMAGE_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}{suffix}"
+    destination = EMPLOYEE_IMAGE_UPLOADS_DIR / filename
+    destination.write_bytes(file_bytes)
+    return f"{EMPLOYEE_IMAGE_URL_PREFIX}/{filename}"
+
+
+def _delete_managed_employee_image(image: str | None) -> None:
+    if image is None or not image.startswith(f"{EMPLOYEE_IMAGE_URL_PREFIX}/"):
+        return
+
+    filename = Path(image).name
+    if not filename:
+        return
+
+    target = EMPLOYEE_IMAGE_UPLOADS_DIR / filename
+    if target.exists():
+        target.unlink()
 
 
 def _table(columns: list[dict[str, str]], rows: list[dict[str, object]]) -> dict[str, object]:
@@ -1412,6 +1475,13 @@ def _render_employees_page(
                 _field(name="email", label="Email", field_type="email", required=True),
                 _field(name="phone", label="Phone"),
                 _field(name="image", label="Image URL or path"),
+                _field(
+                    name="image_file",
+                    label="Upload image file",
+                    field_type="file",
+                    accept=".gif,.jpeg,.jpg,.png,.webp",
+                    help_text="Optional. JPG, PNG, WEBP, or GIF up to 5 MB. If both fields are provided, the uploaded file is used.",
+                ),
                 _field(name="hire_date", label="Hire date", field_type="date", required=True),
                 _field(
                     name="available_leave_balance_days",
@@ -1494,15 +1564,17 @@ async def admin_employees_create(
         return _redirect_to_login(request)
 
     form = await request.form()
+    uploaded_image: str | None = None
     try:
         service.validate_csrf_token_for_user(_clean(form.get("csrf_token")), current_admin)
+        uploaded_image = await _save_employee_image_upload(form.get("image_file"))
         payload = EmployeeCreateRequest(
             matricule=_clean(form.get("matricule"), blank_to_none=False),
             first_name=_clean(form.get("first_name"), blank_to_none=False),
             last_name=_clean(form.get("last_name"), blank_to_none=False),
             email=_clean(form.get("email"), blank_to_none=False),
             phone=_clean(form.get("phone")),
-            image=_clean(form.get("image")),
+            image=uploaded_image or _clean(form.get("image")),
             hire_date=_clean(form.get("hire_date"), blank_to_none=False),
             available_leave_balance_days=_clean(
                 form.get("available_leave_balance_days"),
@@ -1514,7 +1586,11 @@ async def admin_employees_create(
         )
         employee, temporary_password = service.create_employee(payload)
     except HANDLED_EXCEPTIONS as exc:
+        _delete_managed_employee_image(uploaded_image)
         return _redirect_with_message("/admin/employees", message=str(exc), level="danger")
+    except Exception:
+        _delete_managed_employee_image(uploaded_image)
+        raise
 
     return _render_employees_page(
         request,
@@ -1601,6 +1677,13 @@ def admin_employee_detail(
                 _field(name="email", label="Email", field_type="email", value=employee.email, required=True),
                 _field(name="phone", label="Phone", value=employee.phone or ""),
                 _field(name="image", label="Image URL or path", value=employee.image or ""),
+                _field(
+                    name="image_file",
+                    label="Upload new image file",
+                    field_type="file",
+                    accept=".gif,.jpeg,.jpg,.png,.webp",
+                    help_text="Optional. Leave blank to keep the current image unless you edit the text field above.",
+                ),
                 _field(name="hire_date", label="Hire date", field_type="date", value=str(employee.hire_date), required=True),
                 _field(
                     name="available_leave_balance_days",
@@ -1700,15 +1783,19 @@ async def admin_employee_update(
         return _redirect_to_login(request)
 
     form = await request.form()
+    uploaded_image: str | None = None
+    previous_image: str | None = None
     try:
         service.validate_csrf_token_for_user(_clean(form.get("csrf_token")), current_admin)
+        previous_image = service.get_employee(employee_id).image
+        uploaded_image = await _save_employee_image_upload(form.get("image_file"))
         payload = EmployeeUpdateRequest(
             matricule=_clean(form.get("matricule")),
             first_name=_clean(form.get("first_name")),
             last_name=_clean(form.get("last_name")),
             email=_clean(form.get("email")),
             phone=_clean(form.get("phone")),
-            image=_clean(form.get("image")),
+            image=uploaded_image or _clean(form.get("image")),
             hire_date=_clean(form.get("hire_date")),
             available_leave_balance_days=_clean(form.get("available_leave_balance_days")),
             department_id=_clean(form.get("department_id")),
@@ -1716,13 +1803,20 @@ async def admin_employee_update(
             job_title_id=_clean(form.get("job_title_id")),
             is_active=_clean(form.get("is_active")),
         )
-        service.update_employee(employee_id, payload)
+        employee = service.update_employee(employee_id, payload)
     except HANDLED_EXCEPTIONS as exc:
+        _delete_managed_employee_image(uploaded_image)
         return _redirect_with_message(
             f"/admin/employees/{employee_id}",
             message=str(exc),
             level="danger",
         )
+    except Exception:
+        _delete_managed_employee_image(uploaded_image)
+        raise
+
+    if previous_image != employee.image:
+        _delete_managed_employee_image(previous_image)
 
     return _redirect_with_message(
         f"/admin/employees/{employee_id}",
