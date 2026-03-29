@@ -94,7 +94,7 @@ def get_current_user_hierarchy(
 )
 def get_company_hierarchy(
     service: OrganizationService = Depends(get_organization_service),
-    _current_user: User = Depends(require_permission("organization.read_hierarchy.company")),
+    _current_user: User = Depends(require_permission("organization.company_hierarchy")),
 ) -> CompanyHierarchyResponse:
     return CompanyHierarchyResponse.model_validate(service.get_company_hierarchy())
 
