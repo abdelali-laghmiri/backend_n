@@ -596,30 +596,36 @@ class OrganizationService:
     def _build_company_roots(self, snapshot: _HierarchySnapshot) -> list[dict[str, object]]:
         """Build the company-wide hierarchy forest."""
 
+        if not snapshot.records_by_user_id:
+            return []
+
+        records_by_level: dict[int, list[_HierarchyPersonRecord]] = defaultdict(list)
+        for record in snapshot.records_by_user_id.values():
+            records_by_level[record.hierarchical_level].append(record)
+
+        for level_records in records_by_level.values():
+            level_records.sort(key=self._person_sort_key)
+
+        highest_level = max(records_by_level)
+        root_user_ids = [record.user.id for record in records_by_level[highest_level]]
         children_by_user_id: dict[int, list[int]] = defaultdict(list)
-        parent_by_user_id: dict[int, int] = {}
 
-        for user_id, record in snapshot.records_by_user_id.items():
-            parent_user_id = self._resolve_company_parent_user_id(record, snapshot)
-            if parent_user_id is None or parent_user_id == user_id:
-                continue
-            if parent_user_id not in snapshot.records_by_user_id:
+        # Only the highest level becomes a root. Everyone else is attached to the
+        # nearest available higher level so the rendered tree always descends.
+        for level in sorted(records_by_level.keys(), reverse=True):
+            if level == highest_level:
                 continue
 
-            parent_by_user_id[user_id] = parent_user_id
-            children_by_user_id[parent_user_id].append(user_id)
+            for record in records_by_level[level]:
+                parent_user_id = self._resolve_company_parent_user_id(
+                    record,
+                    snapshot,
+                    records_by_level,
+                )
+                if parent_user_id is None or parent_user_id == record.user.id:
+                    continue
 
-        root_user_ids = [
-            user_id
-            for user_id in snapshot.records_by_user_id
-            if user_id not in parent_by_user_id
-        ]
-        if not root_user_ids and snapshot.records_by_user_id:
-            root_user_ids = list(snapshot.records_by_user_id)
-
-        root_user_ids.sort(
-            key=lambda user_id: self._person_sort_key(snapshot.records_by_user_id[user_id])
-        )
+                children_by_user_id[parent_user_id].append(record.user.id)
 
         return [
             self._build_company_tree_node(user_id, children_by_user_id, snapshot, set())
@@ -630,52 +636,80 @@ class OrganizationService:
         self,
         record: _HierarchyPersonRecord,
         snapshot: _HierarchySnapshot,
+        records_by_level: dict[int, list[_HierarchyPersonRecord]],
     ) -> int | None:
-        """Resolve the effective parent user for the company-wide people tree."""
+        """Resolve a valid higher-level parent, preferring the immediate next level."""
 
-        user_id = record.user.id
-        if snapshot.department_ids_by_manager_user_id.get(user_id):
+        candidate_levels = sorted(
+            level for level in records_by_level if level > record.hierarchical_level
+        )
+        if not candidate_levels:
             return None
 
-        led_team_ids = snapshot.team_ids_by_leader_user_id.get(user_id, [])
-        if led_team_ids:
-            parent_candidates: set[int] = set()
-            for team_id in led_team_ids:
-                team = snapshot.teams_by_id.get(team_id)
-                if team is None:
-                    continue
-
-                department = snapshot.departments_by_id.get(team.department_id)
-                if (
-                    department is None
-                    or department.manager_user_id is None
-                    or department.manager_user_id == user_id
-                    or department.manager_user_id not in snapshot.records_by_user_id
-                ):
-                    continue
-
-                parent_candidates.add(department.manager_user_id)
-
-            if len(parent_candidates) == 1:
-                return next(iter(parent_candidates))
-
+        strict_parent_level = record.hierarchical_level + 1
+        target_parent_level = (
+            strict_parent_level
+            if strict_parent_level in records_by_level
+            else candidate_levels[0]
+        )
+        candidates = [
+            candidate
+            for candidate in records_by_level[target_parent_level]
+            if candidate.user.id != record.user.id
+        ]
+        if not candidates:
             return None
 
-        if (
-            record.team is not None
-            and record.team.leader_user_id not in (None, user_id)
-            and record.team.leader_user_id in snapshot.records_by_user_id
-        ):
-            return record.team.leader_user_id
+        best_parent = min(
+            candidates,
+            key=lambda candidate: self._company_parent_candidate_sort_key(
+                record,
+                candidate,
+                snapshot,
+            ),
+        )
+        return best_parent.user.id
 
-        if (
-            record.department is not None
-            and record.department.manager_user_id not in (None, user_id)
-            and record.department.manager_user_id in snapshot.records_by_user_id
-        ):
-            return record.department.manager_user_id
+    def _company_parent_candidate_sort_key(
+        self,
+        child: _HierarchyPersonRecord,
+        candidate: _HierarchyPersonRecord,
+        snapshot: _HierarchySnapshot,
+    ) -> tuple[int, int, int, int, int, int, str, int]:
+        """Rank valid same-level parent candidates using organization context."""
 
-        return None
+        is_child_team_leader = int(
+            child.team is not None and child.team.leader_user_id == candidate.user.id
+        )
+        is_child_department_manager = int(
+            child.department is not None
+            and child.department.manager_user_id == candidate.user.id
+        )
+        is_same_team = int(
+            child.team is not None
+            and candidate.team is not None
+            and child.team.id == candidate.team.id
+        )
+        is_same_department = int(
+            child.department is not None
+            and candidate.department is not None
+            and child.department.id == candidate.department.id
+        )
+        manages_department = int(
+            bool(snapshot.department_ids_by_manager_user_id.get(candidate.user.id))
+        )
+        leads_team = int(bool(snapshot.team_ids_by_leader_user_id.get(candidate.user.id)))
+
+        return (
+            -is_child_team_leader,
+            -is_child_department_manager,
+            -is_same_team,
+            -is_same_department,
+            -manages_department,
+            -leads_team,
+            candidate.full_name.casefold(),
+            candidate.user.id,
+        )
 
     def _build_company_tree_node(
         self,
