@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
@@ -67,6 +68,15 @@ class RequestsValidationError(RuntimeError):
 
 class RequestsAuthorizationError(RuntimeError):
     """Raised when a user is not allowed to access a request."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ApproverStepDecision:
+    """Result of evaluating whether an approver step is actionable or skippable."""
+
+    approver: User | None = None
+    skip_comment: str | None = None
+    error_message: str | None = None
 
 
 class RequestsService:
@@ -1234,11 +1244,9 @@ class RequestsService:
             if step.step_kind != RequestStepKindEnum.APPROVER.value:
                 continue
 
-            resolved_user = self._resolve_approver_for_step(step, requester_employee)
-            if resolved_user is None and step.is_required:
-                raise RequestsValidationError(
-                    f"Workflow step '{step.name}' requires a resolvable approver."
-                )
+            decision = self._evaluate_approver_step(step, requester_employee)
+            if decision.error_message is not None:
+                raise RequestsValidationError(decision.error_message)
 
     def _advance_request_workflow(
         self,
@@ -1252,6 +1260,8 @@ class RequestsService:
         workflow_request.status = RequestStatusEnum.IN_PROGRESS.value
         workflow_request.current_step_id = None
         workflow_request.current_approver_user_id = None
+        workflow_request.completed_at = None
+        workflow_request.rejection_reason = None
 
         workflow_steps = self._get_request_workflow_steps(
             workflow_request.request_type_id,
@@ -1271,24 +1281,22 @@ class RequestsService:
                 )
                 continue
 
-            approver = self._resolve_approver_for_step(step, requester_employee)
-            if approver is None:
-                if step.is_required:
-                    raise RequestsValidationError(
-                        f"Workflow step '{step.name}' requires a resolvable approver."
-                    )
+            decision = self._evaluate_approver_step(step, requester_employee)
+            if decision.error_message is not None:
+                raise RequestsValidationError(decision.error_message)
 
+            if decision.skip_comment is not None:
                 self._record_history(
                     workflow_request=workflow_request,
                     step=step,
                     actor_user_id=None,
                     action=RequestActionEnum.SKIPPED,
-                    comment="Skipped because no approver could be resolved.",
+                    comment=decision.skip_comment,
                 )
                 continue
 
             workflow_request.current_step_id = step.id
-            workflow_request.current_approver_user_id = approver.id
+            workflow_request.current_approver_user_id = decision.approver.id
             return
 
         workflow_request.status = RequestStatusEnum.APPROVED.value
@@ -1297,7 +1305,72 @@ class RequestsService:
         workflow_request.completed_at = utcnow()
         workflow_request.rejection_reason = None
 
-    def _resolve_approver_for_step(
+    def _evaluate_approver_step(
+        self,
+        step: RequestWorkflowStep,
+        requester_employee: Employee,
+    ) -> _ApproverStepDecision:
+        """Evaluate whether an approver step should assign, skip, or fail."""
+
+        approver = self._resolve_candidate_approver_for_step(step, requester_employee)
+        if approver is None:
+            error_message = f"Workflow step '{step.name}' requires a resolvable approver."
+            if step.is_required:
+                return _ApproverStepDecision(error_message=error_message)
+
+            return _ApproverStepDecision(
+                skip_comment="Skipped because no approver could be resolved.",
+            )
+
+        if approver.id == requester_employee.user_id:
+            return _ApproverStepDecision(
+                skip_comment="Skipped because the requester cannot approve their own request.",
+            )
+
+        requester_job_title = self._get_active_job_title(requester_employee.job_title_id)
+        if requester_job_title is None:
+            return _ApproverStepDecision(
+                error_message="Requester job title is no longer active.",
+            )
+
+        approver_employee = self._get_active_employee_by_user_id_optional(approver.id)
+        if approver_employee is None:
+            error_message = (
+                f"Workflow step '{step.name}' resolved an approver without an active employee profile."
+            )
+            if step.is_required:
+                return _ApproverStepDecision(error_message=error_message)
+
+            return _ApproverStepDecision(
+                skip_comment=(
+                    "Skipped because the resolved approver does not have an active employee profile."
+                ),
+            )
+
+        approver_job_title = self._get_active_job_title(approver_employee.job_title_id)
+        if approver_job_title is None:
+            error_message = (
+                f"Workflow step '{step.name}' resolved an approver without an active job title."
+            )
+            if step.is_required:
+                return _ApproverStepDecision(error_message=error_message)
+
+            return _ApproverStepDecision(
+                skip_comment=(
+                    "Skipped because the resolved approver does not have an active job title."
+                ),
+            )
+
+        if approver_job_title.hierarchical_level <= requester_job_title.hierarchical_level:
+            return _ApproverStepDecision(
+                skip_comment=(
+                    "Skipped because the resolved approver is not above the requester in the hierarchy."
+                ),
+            )
+
+        return _ApproverStepDecision(approver=approver)
+
+    def _resolve_candidate_approver_for_step(
         self,
         step: RequestWorkflowStep,
         requester_employee: Employee,
@@ -1606,6 +1679,16 @@ class RequestsService:
 
         return employee
 
+    def _get_active_employee_by_user_id_optional(self, user_id: int) -> Employee | None:
+        """Return the active employee profile linked to a user, if one exists."""
+
+        statement = (
+            select(Employee)
+            .where(Employee.user_id == user_id, Employee.is_active.is_(True))
+            .limit(1)
+        )
+        return self.db.execute(statement).scalar_one_or_none()
+
     def _get_active_user(self, user_id: int) -> User | None:
         """Return an active user by id."""
 
@@ -1614,6 +1697,15 @@ class RequestsService:
             return None
 
         return user
+
+    def _get_active_job_title(self, job_title_id: int) -> JobTitle | None:
+        """Return an active job title by id, if one exists."""
+
+        job_title = self.db.get(JobTitle, job_title_id)
+        if job_title is None or not job_title.is_active:
+            return None
+
+        return job_title
 
     def _get_request_type_fields(
         self,
