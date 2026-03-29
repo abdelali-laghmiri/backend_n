@@ -236,3 +236,30 @@ class JobTitleResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizationHierarchyNodeResponse(BaseModel):
+    """Recursive people-tree node used by organization hierarchy endpoints."""
+
+    user_id: int
+    full_name: str
+    image: str | None = None
+    job_title: str | None = None
+    department: str | None = None
+    team: str | None = None
+    children: list["OrganizationHierarchyNodeResponse"] = Field(default_factory=list)
+
+
+class CurrentUserHierarchyResponse(BaseModel):
+    """Response schema for the current authenticated user's hierarchy tree."""
+
+    root: OrganizationHierarchyNodeResponse
+
+
+class CompanyHierarchyResponse(BaseModel):
+    """Response schema for the full company organigram forest."""
+
+    roots: list[OrganizationHierarchyNodeResponse] = Field(default_factory=list)
+
+
+OrganizationHierarchyNodeResponse.model_rebuild()

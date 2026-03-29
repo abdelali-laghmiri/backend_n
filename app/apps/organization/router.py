@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.apps.organization.dependencies import get_organization_service
 from app.apps.organization.schemas import (
+    CompanyHierarchyResponse,
+    CurrentUserHierarchyResponse,
     DepartmentCreateRequest,
     DepartmentResponse,
     DepartmentUpdateRequest,
@@ -67,6 +69,34 @@ def create_department(
         raise_organization_http_error(exc)
 
     return DepartmentResponse.model_validate(department)
+
+
+@router.get(
+    "/hierarchy/me",
+    response_model=CurrentUserHierarchyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get the current user's organization hierarchy",
+)
+def get_current_user_hierarchy(
+    service: OrganizationService = Depends(get_organization_service),
+    current_user: User = Depends(require_permission("organization.read_hierarchy")),
+) -> CurrentUserHierarchyResponse:
+    return CurrentUserHierarchyResponse.model_validate(
+        service.get_current_user_hierarchy(current_user)
+    )
+
+
+@router.get(
+    "/hierarchy/company",
+    response_model=CompanyHierarchyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get the full company organigram",
+)
+def get_company_hierarchy(
+    service: OrganizationService = Depends(get_organization_service),
+    _current_user: User = Depends(require_permission("organization.read_hierarchy.company")),
+) -> CompanyHierarchyResponse:
+    return CompanyHierarchyResponse.model_validate(service.get_company_hierarchy())
 
 
 @router.get(

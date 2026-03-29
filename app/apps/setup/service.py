@@ -110,6 +110,12 @@ class SetupService:
             "module": "organization",
         },
         {
+            "code": "organization.read_hierarchy",
+            "name": "Read organization hierarchy",
+            "description": "View hierarchy trees for the current user and the full company organigram.",
+            "module": "organization",
+        },
+        {
             "code": "organization.create",
             "name": "Create organization records",
             "description": "Create departments, teams, and job titles.",
@@ -264,6 +270,7 @@ class SetupService:
     DEFAULT_JOB_TITLE_PERMISSION_CODES: dict[str, list[str]] = {
         "RH_MANAGER": [
             "organization.read",
+            "organization.read_hierarchy",
             "organization.create",
             "organization.update",
             "employees.read",
@@ -286,6 +293,7 @@ class SetupService:
         ],
         "DEPARTMENT_MANAGER": [
             "organization.read",
+            "organization.read_hierarchy",
             "employees.read",
             "requests.read",
             "requests.approve",
@@ -295,6 +303,7 @@ class SetupService:
             "dashboard.read",
         ],
         "TEAM_LEADER": [
+            "organization.read_hierarchy",
             "requests.read",
             "requests.create",
             "requests.approve",
