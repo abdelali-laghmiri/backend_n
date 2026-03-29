@@ -69,6 +69,7 @@ class EmployeesService:
             last_name=payload.last_name,
             email=str(payload.email).lower(),
             phone=payload.phone,
+            image=payload.image,
             hire_date=payload.hire_date,
             available_leave_balance_days=payload.available_leave_balance_days,
             department_id=department_id,
@@ -156,6 +157,7 @@ class EmployeesService:
         final_last_name = changes.get("last_name", employee.last_name)
         final_email = str(changes.get("email", employee.email)).lower()
         final_phone = changes.get("phone", employee.phone)
+        final_image = changes.get("image", employee.image)
         final_hire_date = changes.get("hire_date", employee.hire_date)
         final_available_leave_balance_days = changes.get(
             "available_leave_balance_days",
@@ -192,6 +194,7 @@ class EmployeesService:
         employee.last_name = final_last_name
         employee.email = final_email
         employee.phone = final_phone
+        employee.image = final_image
         employee.hire_date = final_hire_date
         employee.available_leave_balance_days = final_available_leave_balance_days
         employee.department_id = department_id

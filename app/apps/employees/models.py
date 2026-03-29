@@ -31,6 +31,7 @@ class Employee(Base):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    image: Mapped[str | None] = mapped_column(String(500), nullable=True)
     hire_date: Mapped[date] = mapped_column(Date, nullable=False)
     available_leave_balance_days: Mapped[int] = mapped_column(
         Integer,

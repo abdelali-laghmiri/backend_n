@@ -43,6 +43,7 @@ class EmployeeCreateRequest(BaseModel):
     last_name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
+    image: str | None = Field(default=None, max_length=500)
     hire_date: date
     available_leave_balance_days: int = Field(default=0, ge=0)
     department_id: int | None = Field(default=None, ge=1)
@@ -64,9 +65,9 @@ class EmployeeCreateRequest(BaseModel):
     def validate_email(cls, value: str) -> str:
         return normalize_email(value)
 
-    @field_validator("phone")
+    @field_validator("phone", "image")
     @classmethod
-    def validate_phone(cls, value: str | None) -> str | None:
+    def validate_optional_text_fields(cls, value: str | None) -> str | None:
         return normalize_optional_string(value)
 
 
@@ -78,6 +79,7 @@ class EmployeeUpdateRequest(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=100)
     email: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
+    image: str | None = Field(default=None, max_length=500)
     hire_date: date | None = None
     available_leave_balance_days: int | None = Field(default=None, ge=0)
     department_id: int | None = Field(default=None, ge=1)
@@ -109,9 +111,9 @@ class EmployeeUpdateRequest(BaseModel):
 
         return normalize_email(value)
 
-    @field_validator("phone")
+    @field_validator("phone", "image")
     @classmethod
-    def validate_phone(cls, value: str | None) -> str | None:
+    def validate_optional_text_fields(cls, value: str | None) -> str | None:
         return normalize_optional_string(value)
 
 
@@ -125,6 +127,7 @@ class EmployeeResponse(BaseModel):
     last_name: str
     email: str
     phone: str | None
+    image: str | None
     hire_date: date
     available_leave_balance_days: int
     department_id: int | None

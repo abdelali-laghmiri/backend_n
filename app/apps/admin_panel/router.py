@@ -1411,6 +1411,7 @@ def _render_employees_page(
                 _field(name="last_name", label="Last name", required=True),
                 _field(name="email", label="Email", field_type="email", required=True),
                 _field(name="phone", label="Phone"),
+                _field(name="image", label="Image URL or path"),
                 _field(name="hire_date", label="Hire date", field_type="date", required=True),
                 _field(
                     name="available_leave_balance_days",
@@ -1501,6 +1502,7 @@ async def admin_employees_create(
             last_name=_clean(form.get("last_name"), blank_to_none=False),
             email=_clean(form.get("email"), blank_to_none=False),
             phone=_clean(form.get("phone")),
+            image=_clean(form.get("image")),
             hire_date=_clean(form.get("hire_date"), blank_to_none=False),
             available_leave_balance_days=_clean(
                 form.get("available_leave_balance_days"),
@@ -1568,6 +1570,7 @@ def admin_employee_detail(
             {"label": "Name", "value": service.build_employee_name(employee)},
             {"label": "Email", "value": employee.email},
             {"label": "Phone", "value": employee.phone or "-"},
+            {"label": "Image", "value": employee.image or "-"},
             {"label": "Hire date", "value": employee.hire_date},
             {"label": "Leave balance days", "value": employee.available_leave_balance_days},
             {
@@ -1597,6 +1600,7 @@ def admin_employee_detail(
                 _field(name="last_name", label="Last name", value=employee.last_name, required=True),
                 _field(name="email", label="Email", field_type="email", value=employee.email, required=True),
                 _field(name="phone", label="Phone", value=employee.phone or ""),
+                _field(name="image", label="Image URL or path", value=employee.image or ""),
                 _field(name="hire_date", label="Hire date", field_type="date", value=str(employee.hire_date), required=True),
                 _field(
                     name="available_leave_balance_days",
@@ -1704,6 +1708,7 @@ async def admin_employee_update(
             last_name=_clean(form.get("last_name")),
             email=_clean(form.get("email")),
             phone=_clean(form.get("phone")),
+            image=_clean(form.get("image")),
             hire_date=_clean(form.get("hire_date")),
             available_leave_balance_days=_clean(form.get("available_leave_balance_days")),
             department_id=_clean(form.get("department_id")),

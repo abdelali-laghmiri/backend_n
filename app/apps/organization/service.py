@@ -846,7 +846,7 @@ class OrganizationService:
         return {
             "user_id": record.user.id,
             "full_name": record.full_name,
-            "image": None,
+            "image": record.employee.image if record.employee is not None else None,
             "job_title": record.job_title.name if record.job_title is not None else None,
             "department": record.department.name if record.department is not None else None,
             "team": record.team.name if record.team is not None else None,
