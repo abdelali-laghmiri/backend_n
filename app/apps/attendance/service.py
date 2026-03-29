@@ -17,6 +17,8 @@ from app.apps.attendance.models import (
 )
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
+    AttendanceNfcCardAssignRequest,
+    AttendanceNfcCardResponse,
     AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
     AttendanceMonthlyReportResponse,
@@ -72,6 +74,55 @@ class AttendanceService:
             scanned_at=payload.scanned_at,
             source=payload.source,
         )
+
+    def assign_nfc_card(
+        self,
+        payload: AttendanceNfcCardAssignRequest,
+    ) -> NfcCard:
+        """Attach one NFC card to one active employee."""
+
+        employee = self._get_employee(payload.employee_id)
+        if not employee.is_active:
+            raise AttendanceValidationError(
+                "Inactive employees cannot be assigned NFC cards."
+            )
+
+        normalized_nfc_uid = self._normalize_nfc_uid(payload.nfc_uid)
+        existing_card = self._find_nfc_card_by_uid(normalized_nfc_uid)
+        if existing_card is not None:
+            if existing_card.employee_id != employee.id:
+                raise AttendanceConflictError(
+                    "This NFC card is already assigned to another employee."
+                )
+
+            if existing_card.is_active:
+                return existing_card
+
+            raise AttendanceValidationError(
+                "This NFC card is already linked to the employee but is inactive."
+            )
+
+        existing_active_employee_card = self._get_active_nfc_card_for_employee(employee.id)
+        if existing_active_employee_card is not None:
+            raise AttendanceConflictError(
+                "This employee already has an active NFC card."
+            )
+
+        nfc_card = NfcCard(
+            employee_id=employee.id,
+            nfc_uid=normalized_nfc_uid,
+            is_active=True,
+        )
+        self.db.add(nfc_card)
+
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise AttendanceConflictError("Failed to assign the NFC card.") from exc
+
+        self.db.refresh(nfc_card)
+        return nfc_card
 
     def _ingest_scan_for_employee(
         self,
@@ -332,6 +383,24 @@ class AttendanceService:
         return AttendanceScanIngestResponse(
             raw_event=self._build_raw_scan_event_response(raw_event, employee),
             daily_summary=self._build_daily_summary_response(daily_summary, employee),
+        )
+
+    def build_nfc_card_response(
+        self,
+        nfc_card: NfcCard,
+    ) -> AttendanceNfcCardResponse:
+        """Build the API response for an NFC card assignment result."""
+
+        employee = self._get_employee(nfc_card.employee_id)
+        return AttendanceNfcCardResponse(
+            id=nfc_card.id,
+            employee_id=nfc_card.employee_id,
+            employee_matricule=employee.matricule,
+            employee_name=self._build_employee_name(employee),
+            nfc_uid=nfc_card.nfc_uid,
+            is_active=nfc_card.is_active,
+            created_at=nfc_card.created_at,
+            updated_at=nfc_card.updated_at,
         )
 
     def build_daily_summary_responses(
@@ -658,17 +727,35 @@ class AttendanceService:
     def _get_nfc_card_by_uid(self, nfc_uid: str) -> NfcCard:
         """Return one NFC card by UID, regardless of card activation state."""
 
-        normalized_nfc_uid = nfc_uid.strip().upper()
-        nfc_card = self.db.execute(
+        nfc_card = self._find_nfc_card_by_uid(nfc_uid)
+        if nfc_card is None:
+            raise AttendanceNotFoundError("NFC card not found for the provided nfc_uid.")
+
+        return nfc_card
+
+    def _find_nfc_card_by_uid(self, nfc_uid: str) -> NfcCard | None:
+        """Return one NFC card by UID, or None when no match exists."""
+
+        normalized_nfc_uid = self._normalize_nfc_uid(nfc_uid)
+        return self.db.execute(
             select(NfcCard)
             .where(func.upper(NfcCard.nfc_uid) == normalized_nfc_uid)
             .order_by(NfcCard.id.asc())
             .limit(1)
         ).scalar_one_or_none()
-        if nfc_card is None:
-            raise AttendanceNotFoundError("NFC card not found for the provided nfc_uid.")
 
-        return nfc_card
+    def _get_active_nfc_card_for_employee(self, employee_id: int) -> NfcCard | None:
+        """Return the first active NFC card currently assigned to an employee."""
+
+        return self.db.execute(
+            select(NfcCard)
+            .where(
+                NfcCard.employee_id == employee_id,
+                NfcCard.is_active.is_(True),
+            )
+            .order_by(NfcCard.id.asc())
+            .limit(1)
+        ).scalar_one_or_none()
 
     def _get_employees_by_ids(self, employee_ids: set[int]) -> dict[int, Employee]:
         """Load employees in bulk by id."""
@@ -698,6 +785,11 @@ class AttendanceService:
         """Build a readable employee full name."""
 
         return f"{employee.first_name} {employee.last_name}"
+
+    def _normalize_nfc_uid(self, nfc_uid: str) -> str:
+        """Normalize NFC card identifiers for service-layer comparisons."""
+
+        return nfc_uid.strip().upper()
 
     def _normalize_daily_summary_datetimes(
         self,

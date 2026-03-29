@@ -8,6 +8,8 @@ from app.apps.attendance.dependencies import get_attendance_service
 from app.apps.attendance.models import AttendanceStatusEnum
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
+    AttendanceNfcCardAssignRequest,
+    AttendanceNfcCardResponse,
     AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
     AttendanceMonthlyReportGenerateResponse,
@@ -111,6 +113,29 @@ def ingest_nfc_scan_event(
         raise_attendance_http_error(exc)
 
     return service.build_scan_ingest_response(raw_event, daily_summary)
+
+
+@router.post(
+    "/nfc-cards/assign",
+    response_model=AttendanceNfcCardResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Assign an NFC card to an employee",
+)
+def assign_nfc_card(
+    payload: AttendanceNfcCardAssignRequest,
+    service: AttendanceService = Depends(get_attendance_service),
+    _current_user: User = Depends(require_permission("attendance.nfc.assign_card")),
+) -> AttendanceNfcCardResponse:
+    try:
+        nfc_card = service.assign_nfc_card(payload)
+    except (
+        AttendanceConflictError,
+        AttendanceNotFoundError,
+        AttendanceValidationError,
+    ) as exc:
+        raise_attendance_http_error(exc)
+
+    return service.build_nfc_card_response(nfc_card)
 
 
 @router.get(

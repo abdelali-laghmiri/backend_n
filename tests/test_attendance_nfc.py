@@ -6,23 +6,32 @@ import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_attendance_nfc_bootstrap.db"
 
+from app.apps.attendance.dependencies import get_attendance_service
+from app.apps.attendance.router import router as attendance_router
 from app.apps.attendance.models import AttendanceStatusEnum, NfcCard
 from app.apps.attendance.schemas import (
+    AttendanceNfcCardAssignRequest,
     AttendanceNfcScanIngestRequest,
     AttendanceScanIngestRequest,
 )
 from app.apps.attendance.service import (
+    AttendanceConflictError,
     AttendanceNotFoundError,
     AttendanceService,
     AttendanceValidationError,
 )
+from app.apps.auth.dependencies import get_current_active_user
 from app.apps.employees.models import Employee
 from app.apps.organization.models import JobTitle
+from app.apps.permissions.dependencies import get_permissions_service
+from app.apps.setup.service import SetupService
 from app.apps.users.models import User
 from app.db.base import Base
 
@@ -171,6 +180,128 @@ class AttendanceNfcTests(unittest.TestCase):
                 )
             )
 
+    def test_assign_nfc_card_creates_active_mapping(self) -> None:
+        employee = self._seed_employee()
+
+        nfc_card = self.service.assign_nfc_card(
+            AttendanceNfcCardAssignRequest(
+                employee_id=employee.id,
+                nfc_uid="04aabbccdd11",
+            )
+        )
+
+        self.assertEqual(nfc_card.employee_id, employee.id)
+        self.assertEqual(nfc_card.nfc_uid, "04AABBCCDD11")
+        self.assertTrue(nfc_card.is_active)
+
+    def test_assign_nfc_card_is_idempotent_for_same_employee_and_card(self) -> None:
+        employee = self._seed_employee(nfc_uid="04AABBCCDD11")
+
+        first_card = self.db.query(NfcCard).filter(NfcCard.employee_id == employee.id).one()
+        second_card = self.service.assign_nfc_card(
+            AttendanceNfcCardAssignRequest(
+                employee_id=employee.id,
+                nfc_uid="04aabbccdd11",
+            )
+        )
+
+        self.assertEqual(second_card.id, first_card.id)
+        self.assertEqual(self.db.query(NfcCard).count(), 1)
+
+    def test_assign_nfc_card_rejects_duplicate_uid_for_other_employee(self) -> None:
+        self._seed_employee(nfc_uid="04AABBCCDD11")
+        other_employee = self._seed_employee()
+
+        with self.assertRaises(AttendanceConflictError):
+            self.service.assign_nfc_card(
+                AttendanceNfcCardAssignRequest(
+                    employee_id=other_employee.id,
+                    nfc_uid="04AABBCCDD11",
+                )
+            )
+
+    def test_assign_nfc_card_rejects_second_active_card_for_same_employee(self) -> None:
+        employee = self._seed_employee(nfc_uid="CARD-ONE")
+
+        with self.assertRaises(AttendanceConflictError):
+            self.service.assign_nfc_card(
+                AttendanceNfcCardAssignRequest(
+                    employee_id=employee.id,
+                    nfc_uid="CARD-TWO",
+                )
+            )
+
+    def test_assign_nfc_card_rejects_inactive_employee(self) -> None:
+        employee = self._seed_employee(employee_is_active=False)
+
+        with self.assertRaises(AttendanceValidationError):
+            self.service.assign_nfc_card(
+                AttendanceNfcCardAssignRequest(
+                    employee_id=employee.id,
+                    nfc_uid="04AABBCCDD11",
+                )
+            )
+
+    def test_assign_nfc_card_endpoint_requires_permission(self) -> None:
+        employee = self._seed_employee()
+        client = self._build_test_client(allowed_permissions=set())
+
+        response = client.post(
+            "/attendance/nfc-cards/assign",
+            json={
+                "employee_id": employee.id,
+                "nfc_uid": "04AABBCCDD11",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "Permission 'attendance.nfc.assign_card' is required.",
+        )
+
+    def test_assign_nfc_card_endpoint_assigns_card_with_permission(self) -> None:
+        employee = self._seed_employee()
+        client = self._build_test_client(
+            allowed_permissions={"attendance.nfc.assign_card"}
+        )
+
+        response = client.post(
+            "/attendance/nfc-cards/assign",
+            json={
+                "employee_id": employee.id,
+                "nfc_uid": "04aabbccdd11",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["employee_id"], employee.id)
+        self.assertEqual(response.json()["employee_matricule"], employee.matricule)
+        self.assertEqual(response.json()["nfc_uid"], "04AABBCCDD11")
+
+    def test_setup_defaults_seed_nfc_assign_permission_for_rh_manager_only(self) -> None:
+        default_permission_codes = {
+            definition["code"] for definition in SetupService.DEFAULT_PERMISSIONS
+        }
+
+        self.assertIn("attendance.nfc.assign_card", default_permission_codes)
+        self.assertIn(
+            "attendance.nfc.assign_card",
+            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["RH_MANAGER"],
+        )
+        self.assertNotIn(
+            "attendance.nfc.assign_card",
+            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["DEPARTMENT_MANAGER"],
+        )
+        self.assertNotIn(
+            "attendance.nfc.assign_card",
+            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["TEAM_LEADER"],
+        )
+        self.assertNotIn(
+            "attendance.nfc.assign_card",
+            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["EMPLOYEE"],
+        )
+
     def _seed_employee(
         self,
         *,
@@ -202,6 +333,20 @@ class AttendanceNfcTests(unittest.TestCase):
 
         self.db.commit()
         return employee
+
+    def _build_test_client(self, *, allowed_permissions: set[str]) -> TestClient:
+        app = FastAPI()
+        app.include_router(attendance_router)
+        current_user = _make_user(999)
+
+        class StubPermissionsService:
+            def user_has_permission(self, _user: User, permission_code: str) -> bool:
+                return permission_code in allowed_permissions
+
+        app.dependency_overrides[get_attendance_service] = lambda: self.service
+        app.dependency_overrides[get_current_active_user] = lambda: current_user
+        app.dependency_overrides[get_permissions_service] = lambda: StubPermissionsService()
+        return TestClient(app)
 
 
 if __name__ == "__main__":

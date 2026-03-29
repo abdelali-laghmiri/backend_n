@@ -224,6 +224,12 @@ class SetupService:
             "module": "attendance",
         },
         {
+            "code": "attendance.nfc.assign_card",
+            "name": "Assign NFC cards",
+            "description": "Attach NFC cards to employees for attendance identification.",
+            "module": "attendance",
+        },
+        {
             "code": "attendance.reports.generate",
             "name": "Generate attendance reports",
             "description": "Generate monthly attendance reports from daily summaries.",
@@ -286,6 +292,7 @@ class SetupService:
             "requests.read_all",
             "attendance.read",
             "attendance.ingest",
+            "attendance.nfc.assign_card",
             "attendance.reports.generate",
             "performance.read",
             "performance.manage",

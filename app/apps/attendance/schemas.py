@@ -69,6 +69,18 @@ class AttendanceNfcScanIngestRequest(AttendanceScanBaseRequest):
         return normalize_required_string(value).upper()
 
 
+class AttendanceNfcCardAssignRequest(BaseModel):
+    """Payload used to attach one NFC card to one employee."""
+
+    employee_id: int = Field(ge=1)
+    nfc_uid: str = Field(min_length=1, max_length=120)
+
+    @field_validator("nfc_uid")
+    @classmethod
+    def validate_nfc_uid(cls, value: str) -> str:
+        return normalize_required_string(value).upper()
+
+
 class AttendanceRawScanEventResponse(BaseModel):
     """Raw scan event response schema."""
 
@@ -105,6 +117,19 @@ class AttendanceScanIngestResponse(BaseModel):
 
     raw_event: AttendanceRawScanEventResponse
     daily_summary: AttendanceDailySummaryResponse
+
+
+class AttendanceNfcCardResponse(BaseModel):
+    """Response returned after attaching one NFC card to one employee."""
+
+    id: int
+    employee_id: int
+    employee_matricule: str
+    employee_name: str
+    nfc_uid: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class AttendanceMonthlyReportGenerateRequest(BaseModel):
