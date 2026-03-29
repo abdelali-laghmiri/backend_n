@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,6 +29,32 @@ class AttendanceStatusEnum(str, Enum):
     INCOMPLETE = "incomplete"
     ABSENT = "absent"
     LEAVE = "leave"
+
+
+class NfcCard(Base):
+    """Simple NFC card to employee mapping used for attendance resolution."""
+
+    __tablename__ = "nfc_cards"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("employees.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    nfc_uid: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
 
 
 class AttendanceRawScanEvent(Base):
@@ -159,4 +185,5 @@ __all__ = [
     "AttendanceRawScanEvent",
     "AttendanceReaderTypeEnum",
     "AttendanceStatusEnum",
+    "NfcCard",
 ]

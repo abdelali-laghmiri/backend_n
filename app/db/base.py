@@ -4,6 +4,7 @@ from app.apps.attendance.models import (  # noqa: F401
     AttendanceDailySummary,
     AttendanceMonthlyReport,
     AttendanceRawScanEvent,
+    NfcCard,
 )
 from app.apps.employees.models import Employee  # noqa: F401
 from app.apps.notifications.models import Notification  # noqa: F401

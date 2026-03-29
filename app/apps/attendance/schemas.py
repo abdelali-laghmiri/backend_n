@@ -25,18 +25,12 @@ class AttendanceStatusResponse(ModuleStatusResponse):
     module: Literal["attendance"] = "attendance"
 
 
-class AttendanceScanIngestRequest(BaseModel):
-    """Payload sent by the external pointage application."""
+class AttendanceScanBaseRequest(BaseModel):
+    """Shared payload fields used by attendance scan ingestion endpoints."""
 
-    matricule: str = Field(min_length=1, max_length=50)
     reader_type: AttendanceReaderTypeEnum
     scanned_at: datetime
     source: str = Field(default="external_pointage_app", min_length=1, max_length=120)
-
-    @field_validator("matricule")
-    @classmethod
-    def validate_matricule(cls, value: str) -> str:
-        return normalize_required_string(value).upper()
 
     @field_validator("source")
     @classmethod
@@ -51,6 +45,28 @@ class AttendanceScanIngestRequest(BaseModel):
             return value.replace(tzinfo=timezone.utc)
 
         return value
+
+
+class AttendanceScanIngestRequest(AttendanceScanBaseRequest):
+    """Payload sent by the external pointage application using matricule identity."""
+
+    matricule: str = Field(min_length=1, max_length=50)
+
+    @field_validator("matricule")
+    @classmethod
+    def validate_matricule(cls, value: str) -> str:
+        return normalize_required_string(value).upper()
+
+
+class AttendanceNfcScanIngestRequest(AttendanceScanBaseRequest):
+    """Payload sent by the external pointage application using NFC identity."""
+
+    nfc_uid: str = Field(min_length=1, max_length=120)
+
+    @field_validator("nfc_uid")
+    @classmethod
+    def validate_nfc_uid(cls, value: str) -> str:
+        return normalize_required_string(value).upper()
 
 
 class AttendanceRawScanEventResponse(BaseModel):

@@ -8,6 +8,7 @@ from app.apps.attendance.dependencies import get_attendance_service
 from app.apps.attendance.models import AttendanceStatusEnum
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
+    AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
     AttendanceMonthlyReportGenerateResponse,
     AttendanceMonthlyReportResponse,
@@ -79,6 +80,29 @@ def ingest_scan_event(
 ) -> AttendanceScanIngestResponse:
     try:
         raw_event, daily_summary = service.ingest_scan_event(payload)
+    except (
+        AttendanceConflictError,
+        AttendanceNotFoundError,
+        AttendanceValidationError,
+    ) as exc:
+        raise_attendance_http_error(exc)
+
+    return service.build_scan_ingest_response(raw_event, daily_summary)
+
+
+@router.post(
+    "/nfc-scans",
+    response_model=AttendanceScanIngestResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest an NFC attendance scan event",
+)
+def ingest_nfc_scan_event(
+    payload: AttendanceNfcScanIngestRequest,
+    service: AttendanceService = Depends(get_attendance_service),
+    _current_user: User = Depends(require_permission("attendance.ingest")),
+) -> AttendanceScanIngestResponse:
+    try:
+        raw_event, daily_summary = service.ingest_nfc_scan_event(payload)
     except (
         AttendanceConflictError,
         AttendanceNotFoundError,

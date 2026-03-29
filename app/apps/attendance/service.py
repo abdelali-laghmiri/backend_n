@@ -3,7 +3,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,9 +13,11 @@ from app.apps.attendance.models import (
     AttendanceRawScanEvent,
     AttendanceReaderTypeEnum,
     AttendanceStatusEnum,
+    NfcCard,
 )
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
+    AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
     AttendanceMonthlyReportResponse,
     AttendanceRawScanEventResponse,
@@ -50,22 +52,53 @@ class AttendanceService:
         """Persist a raw scan event and update the employee daily summary."""
 
         employee = self._get_active_employee_by_matricule(payload.matricule)
-        attendance_date = payload.scanned_at.date()
-        stored_scanned_at = payload.scanned_at.astimezone(timezone.utc)
+        return self._ingest_scan_for_employee(
+            employee=employee,
+            reader_type=payload.reader_type,
+            scanned_at=payload.scanned_at,
+            source=payload.source,
+        )
+
+    def ingest_nfc_scan_event(
+        self,
+        payload: AttendanceNfcScanIngestRequest,
+    ) -> tuple[AttendanceRawScanEvent, AttendanceDailySummary]:
+        """Persist an NFC-based raw scan event and update the employee daily summary."""
+
+        employee = self._get_active_employee_by_nfc_uid(payload.nfc_uid)
+        return self._ingest_scan_for_employee(
+            employee=employee,
+            reader_type=payload.reader_type,
+            scanned_at=payload.scanned_at,
+            source=payload.source,
+        )
+
+    def _ingest_scan_for_employee(
+        self,
+        *,
+        employee: Employee,
+        reader_type: AttendanceReaderTypeEnum,
+        scanned_at: datetime,
+        source: str,
+    ) -> tuple[AttendanceRawScanEvent, AttendanceDailySummary]:
+        """Persist a raw scan event and update the target employee daily summary."""
+
+        attendance_date = scanned_at.date()
+        stored_scanned_at = scanned_at.astimezone(timezone.utc)
         daily_summary = self._get_or_create_daily_summary(employee.id, attendance_date)
 
         raw_event = AttendanceRawScanEvent(
             employee_id=employee.id,
             user_id=employee.user_id,
-            reader_type=payload.reader_type.value,
+            reader_type=reader_type.value,
             scanned_at=stored_scanned_at,
-            source=payload.source,
+            source=source,
         )
         self.db.add(raw_event)
 
         self._apply_scan_to_daily_summary(
             daily_summary=daily_summary,
-            reader_type=payload.reader_type,
+            reader_type=reader_type,
             scanned_at=stored_scanned_at,
         )
         self.db.add(daily_summary)
@@ -80,6 +113,8 @@ class AttendanceService:
 
         self.db.refresh(raw_event)
         self.db.refresh(daily_summary)
+        raw_event.scanned_at = self._normalize_utc_datetime(raw_event.scanned_at)
+        self._normalize_daily_summary_datetimes(daily_summary)
         return raw_event, daily_summary
 
     def list_daily_summaries(
@@ -350,7 +385,7 @@ class AttendanceService:
             employee_matricule=employee.matricule,
             employee_name=self._build_employee_name(employee),
             reader_type=AttendanceReaderTypeEnum(raw_event.reader_type),
-            scanned_at=raw_event.scanned_at,
+            scanned_at=self._normalize_utc_datetime(raw_event.scanned_at),
             source=raw_event.source,
             created_at=raw_event.created_at,
         )
@@ -368,8 +403,8 @@ class AttendanceService:
             employee_matricule=employee.matricule,
             employee_name=self._build_employee_name(employee),
             attendance_date=summary.attendance_date,
-            first_check_in_at=summary.first_check_in_at,
-            last_check_out_at=summary.last_check_out_at,
+            first_check_in_at=self._normalize_utc_datetime(summary.first_check_in_at),
+            last_check_out_at=self._normalize_utc_datetime(summary.last_check_out_at),
             worked_duration_minutes=summary.worked_duration_minutes,
             status=AttendanceStatusEnum(summary.status),
             linked_request_id=summary.linked_request_id,
@@ -509,18 +544,21 @@ class AttendanceService:
     ) -> None:
         """Apply one IN or OUT scan event to a daily summary."""
 
+        normalized_scanned_at = self._normalize_utc_datetime(scanned_at)
+        self._normalize_daily_summary_datetimes(daily_summary)
+
         if reader_type == AttendanceReaderTypeEnum.IN:
             if (
                 daily_summary.first_check_in_at is None
-                or scanned_at < daily_summary.first_check_in_at
+                or normalized_scanned_at < daily_summary.first_check_in_at
             ):
-                daily_summary.first_check_in_at = scanned_at
+                daily_summary.first_check_in_at = normalized_scanned_at
         elif reader_type == AttendanceReaderTypeEnum.OUT:
             if (
                 daily_summary.last_check_out_at is None
-                or scanned_at > daily_summary.last_check_out_at
+                or normalized_scanned_at > daily_summary.last_check_out_at
             ):
-                daily_summary.last_check_out_at = scanned_at
+                daily_summary.last_check_out_at = normalized_scanned_at
         else:
             raise AttendanceValidationError("Unsupported attendance reader type.")
 
@@ -538,6 +576,8 @@ class AttendanceService:
     ) -> int | None:
         """Compute the worked duration in minutes when both scans are coherent."""
 
+        first_check_in_at = self._normalize_utc_datetime(first_check_in_at)
+        last_check_out_at = self._normalize_utc_datetime(last_check_out_at)
         if first_check_in_at is None or last_check_out_at is None:
             return None
 
@@ -595,6 +635,41 @@ class AttendanceService:
 
         return employee
 
+    def _get_active_employee_by_nfc_uid(self, nfc_uid: str) -> Employee:
+        """Return the active employee linked to an active NFC card."""
+
+        nfc_card = self._get_nfc_card_by_uid(nfc_uid)
+        if not nfc_card.is_active:
+            raise AttendanceValidationError("The NFC card linked to this scan is inactive.")
+
+        employee = self.db.get(Employee, nfc_card.employee_id)
+        if employee is None:
+            raise AttendanceValidationError(
+                "The NFC card is linked to a missing employee record."
+            )
+
+        if not employee.is_active:
+            raise AttendanceValidationError(
+                "The NFC card is linked to an inactive employee."
+            )
+
+        return employee
+
+    def _get_nfc_card_by_uid(self, nfc_uid: str) -> NfcCard:
+        """Return one NFC card by UID, regardless of card activation state."""
+
+        normalized_nfc_uid = nfc_uid.strip().upper()
+        nfc_card = self.db.execute(
+            select(NfcCard)
+            .where(func.upper(NfcCard.nfc_uid) == normalized_nfc_uid)
+            .order_by(NfcCard.id.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if nfc_card is None:
+            raise AttendanceNotFoundError("NFC card not found for the provided nfc_uid.")
+
+        return nfc_card
+
     def _get_employees_by_ids(self, employee_ids: set[int]) -> dict[int, Employee]:
         """Load employees in bulk by id."""
 
@@ -623,3 +698,30 @@ class AttendanceService:
         """Build a readable employee full name."""
 
         return f"{employee.first_name} {employee.last_name}"
+
+    def _normalize_daily_summary_datetimes(
+        self,
+        daily_summary: AttendanceDailySummary,
+    ) -> None:
+        """Normalize summary datetime fields to UTC-aware values in memory."""
+
+        daily_summary.first_check_in_at = self._normalize_utc_datetime(
+            daily_summary.first_check_in_at
+        )
+        daily_summary.last_check_out_at = self._normalize_utc_datetime(
+            daily_summary.last_check_out_at
+        )
+
+    def _normalize_utc_datetime(
+        self,
+        value: datetime | None,
+    ) -> datetime | None:
+        """Treat naive attendance datetimes as UTC and return UTC-aware values."""
+
+        if value is None:
+            return None
+
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+
+        return value.astimezone(timezone.utc)
