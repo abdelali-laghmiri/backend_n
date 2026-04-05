@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: hr-management-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+      - key: DB_ECHO
+        value: "false"
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hr-management-db
+          property: connectionString
+      - key: SUPERADMIN_MATRICULE
+        sync: false
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      - key: SUPERADMIN_FIRST_NAME
+        sync: false
+      - key: SUPERADMIN_LAST_NAME
+        sync: false
+      - key: SUPERADMIN_EMAIL
+        sync: false
+
+databases:
+  - name: hr-management-db
+    databaseName: hr_management
+    user: hr_management_user

@@ -2,6 +2,11 @@
 
 This project implements a modular HR management backend built with FastAPI, SQLAlchemy, Alembic, and Docker. The backend stays API-centric so the same service can support web frontends, Windows desktop clients, and Android clients from one codebase. The current codebase includes infrastructure, setup, authentication, organization, employees, permissions, and a generic requests engine foundation.
 
+## Project Docs
+
+- Deployment guide (Render + generic hosting): `docs/deployent_informations.md`
+- Technical analysis notes: `docs/analysis/`
+
 ## Configuration
 
 Application settings are centralized in `app/core/config.py` and loaded from `.env`.
