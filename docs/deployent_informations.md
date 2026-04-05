@@ -5,7 +5,7 @@ This project is now prepared for cloud deployment with Docker, automatic migrati
 ## What was prepared
 
 - `render.yaml` blueprint for Render web service + PostgreSQL database.
-- `scripts/start.sh` startup script that can run migrations automatically.
+- `scripts/entrypoint.sh` startup script that runs migrations before app startup.
 - `Procfile` for platforms that use Procfile start commands.
 - `app/server.py` already supports `PORT`, which Render and many hosts inject automatically.
 
@@ -55,9 +55,7 @@ You can deploy the same app on Railway, Fly.io, VPS, or any Docker host.
 
 Use this startup command pattern:
 
-```bash
-python -m alembic upgrade head && python -m app.server
-```
+The container startup now runs migrations automatically, then starts the app command.
 
 Minimum required production env vars:
 
