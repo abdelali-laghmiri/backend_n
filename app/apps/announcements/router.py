@@ -192,7 +192,7 @@ def delete_announcement(
     announcement_id: int,
     service: AnnouncementsService = Depends(get_announcements_service),
     current_user: User = Depends(require_permission("announcements.delete")),
-) -> Response:
+):
     try:
         service.deactivate_announcement(announcement_id, current_user)
     except (AnnouncementsConflictError, AnnouncementsNotFoundError) as exc:
