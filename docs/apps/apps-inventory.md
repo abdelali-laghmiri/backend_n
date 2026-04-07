@@ -13,6 +13,7 @@
 | `permissions` | Permission catalog and job-title assignments | `/api/v1/permissions/...` | `app/apps/permissions/service.py`, `router.py`, `dependencies.py` | Clear and useful |
 | `requests` | Dynamic workflow requests and leave rules | `/api/v1/requests/...` | `app/apps/requests/service.py`, `router.py`, `leave_business.py` | Powerful, but very large |
 | `notifications` | Persisted notifications and realtime websocket delivery | `/api/v1/notifications/...`, websocket | `app/apps/notifications/service.py`, `router.py`, `realtime.py` | Useful, but not horizontally scalable |
+| `announcements` | Company-wide internal news, attachments, and per-user seen tracking | `/api/v1/announcements/...` | `app/apps/announcements/service.py`, `router.py`, `models.py` | Focused V1 feature |
 | `attendance` | Scan ingestion, NFC cards, daily summaries, monthly reports | `/api/v1/attendance/...` | `app/apps/attendance/service.py`, `router.py`, `models.py` | Mature feature area |
 | `performance` | Team objectives and daily performance metrics | `/api/v1/performance/...` | `app/apps/performance/service.py`, `router.py`, `models.py` | Coherent, smaller scope |
 | `dashboard` | Aggregated read models for overview screens and summaries | `/api/v1/dashboard/...`, admin overview | `app/apps/dashboard/service.py`, `router.py` | Useful aggregation layer, growing complex |
@@ -41,6 +42,7 @@ These are not domain modules, but they materially affect the whole system:
 - permissions
 - requests
 - notifications
+- announcements
 - attendance
 - performance
 - dashboard
