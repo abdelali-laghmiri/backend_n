@@ -185,17 +185,19 @@ def update_announcement(
     "/{announcement_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     summary="Delete an announcement by deactivating it",
 )
 def delete_announcement(
     announcement_id: int,
     service: AnnouncementsService = Depends(get_announcements_service),
     current_user: User = Depends(require_permission("announcements.delete")),
-) -> None:
+) -> Response:
     try:
         service.deactivate_announcement(announcement_id, current_user)
     except (AnnouncementsConflictError, AnnouncementsNotFoundError) as exc:
         raise_announcements_http_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
