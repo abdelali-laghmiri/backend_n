@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 
 from app.apps.announcements.dependencies import get_announcements_service
 from app.apps.announcements.schemas import (
@@ -184,6 +184,7 @@ def update_announcement(
 @router.delete(
     "/{announcement_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     summary="Delete an announcement by deactivating it",
 )
 def delete_announcement(

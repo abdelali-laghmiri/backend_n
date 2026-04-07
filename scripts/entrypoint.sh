@@ -3,14 +3,16 @@ set -eu
 
 run_migrations() {
   if [ "${RUN_MIGRATIONS:-true}" != "true" ]; then
+    echo "Skipping migrations because RUN_MIGRATIONS=${RUN_MIGRATIONS:-false}."
     return
   fi
 
   if [ -z "${DATABASE_URL:-}" ]; then
-    echo "DATABASE_URL is required when RUN_MIGRATIONS=true." >&2
-    exit 1
+    echo "DATABASE_URL is not set; skipping migrations and starting the app."
+    return
   fi
 
+  echo "Running database migrations..."
   python - <<'PY'
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ database_url = normalize_database_url(os.environ["DATABASE_URL"])
 retries = int(os.getenv("MIGRATION_RETRIES", "10"))
 retry_delay_seconds = float(os.getenv("MIGRATION_RETRY_DELAY_SECONDS", "3"))
 lock_id = int(os.getenv("ALEMBIC_LOCK_ID", "821457901"))
+strict_mode = os.getenv("MIGRATION_STRICT", "false").lower() in {"1", "true", "yes", "on"}
 
 alembic_config = Config("alembic.ini")
 alembic_config.set_main_option("sqlalchemy.url", database_url)
@@ -43,6 +46,7 @@ last_error: Exception | None = None
 
 for attempt in range(1, retries + 1):
     try:
+        print(f"[migrations] Attempt {attempt}/{retries}...")
         with engine.connect() as connection:
             is_postgres = connection.dialect.name == "postgresql"
             if is_postgres:
@@ -62,17 +66,25 @@ for attempt in range(1, retries + 1):
                     )
 
         last_error = None
+        print("[migrations] Migration completed successfully.")
         break
     except Exception as exc:  # pragma: no cover - runtime bootstrap path
         last_error = exc
+        print(f"[migrations] Attempt {attempt} failed: {exc}")
         if attempt >= retries:
             break
+        print(f"[migrations] Retrying in {retry_delay_seconds} seconds...")
         time.sleep(retry_delay_seconds)
 
+engine.dispose()
+
 if last_error is not None:
-    raise last_error
+    if strict_mode:
+        raise last_error
+    print("[migrations] Migration failed after retries; continuing startup because MIGRATION_STRICT=false.")
 PY
 }
 
 run_migrations
+echo "Starting application: $*"
 exec "$@"

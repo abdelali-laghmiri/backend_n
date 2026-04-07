@@ -1,1 +1,1 @@
-web: python -m alembic upgrade head && python -m app.server
+web: sh ./scripts/entrypoint.sh python -m app.server
