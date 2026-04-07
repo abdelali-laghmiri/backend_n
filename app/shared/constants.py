@@ -32,6 +32,10 @@ API_TAGS = [
         "description": "Internal user notifications and realtime delivery endpoints.",
     },
     {
+        "name": "Announcements",
+        "description": "Company-wide internal announcements and news endpoints.",
+    },
+    {
         "name": "Requests",
         "description": "Employee request and approval workflow endpoints.",
     },

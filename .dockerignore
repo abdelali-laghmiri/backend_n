@@ -6,6 +6,16 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+venv/
 .env
+.env.*
 *.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+tests/
+docs/
+.vscode/
+.idea/
 .git/

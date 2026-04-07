@@ -1,18 +1,52 @@
+# Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Virtual environments
 .venv/
+venv/
+
+# Python cache / artifacts
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.db
+*.so
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
-.idea/
-.vscode/
 dist/
 build/
 *.egg-info/
+.eggs/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local databases / runtime data
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+instance/
+*.log
+logs/
+app/static/uploads/*
+!app/static/uploads/.gitkeep
+!app/static/uploads/employees/
+app/static/uploads/employees/*
+!app/static/uploads/employees/.gitkeep
+
+# Alembic bytecode
 alembic/versions/*.pyc

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from app.apps.announcements.models import (  # noqa: F401
+    Announcement,
+    AnnouncementAttachment,
+    AnnouncementRead,
+)
 from app.apps.attendance.models import (  # noqa: F401
     AttendanceDailySummary,
     AttendanceMonthlyReport,
