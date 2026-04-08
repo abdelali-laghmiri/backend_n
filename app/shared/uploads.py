@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from uuid import uuid4
 
 from starlette.datastructures import UploadFile
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
-UPLOADS_DIR = STATIC_DIR / "uploads"
+UPLOADS_URL_PREFIX = "/static/uploads"
+
+
+def _resolve_uploads_dir() -> Path:
+    """Resolve the uploads directory, using a writable path on serverless runtimes."""
+
+    configured_uploads_dir = os.getenv("MANAGED_UPLOADS_DIR", "").strip()
+    if configured_uploads_dir:
+        return Path(configured_uploads_dir)
+
+    # Vercel serverless deployments expose a read-only application directory.
+    if os.getenv("VERCEL") == "1":
+        return Path("/tmp/uploads")
+
+    return STATIC_DIR / "uploads"
+
+
+UPLOADS_DIR = _resolve_uploads_dir()
 
 
 class ManagedUploadValidationError(ValueError):
@@ -79,7 +97,7 @@ async def save_managed_upload(
     return StoredUploadFile(
         original_file_name=Path(upload.filename).name,
         stored_file_name=stored_file_name,
-        file_url=f"/static/uploads/{category}/{stored_file_name}",
+        file_url=f"{UPLOADS_URL_PREFIX}/{category}/{stored_file_name}",
         content_type=content_type,
         file_extension=file_extension,
         file_size_bytes=len(file_bytes),
@@ -114,11 +132,11 @@ def _resolve_managed_upload_path(
 ) -> Path | None:
     """Resolve a managed upload URL to a safe local file path when possible."""
 
-    if file_url is None or not file_url.startswith("/static/uploads/"):
+    if file_url is None or not file_url.startswith(f"{UPLOADS_URL_PREFIX}/"):
         return None
 
-    relative_path = Path(file_url.removeprefix("/static/"))
-    target = (STATIC_DIR / relative_path).resolve()
+    relative_path = Path(file_url.removeprefix(f"{UPLOADS_URL_PREFIX}/"))
+    target = (UPLOADS_DIR / relative_path).resolve()
     uploads_root = UPLOADS_DIR.resolve()
 
     if not _is_relative_to(target, uploads_root):

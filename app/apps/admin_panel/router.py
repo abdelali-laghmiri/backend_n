@@ -91,11 +91,12 @@ from app.apps.setup.service import (
     SetupValidationError,
 )
 from app.apps.users.models import User
+from app.shared.uploads import UPLOADS_DIR
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
-EMPLOYEE_IMAGE_UPLOADS_DIR = STATIC_DIR / "uploads" / "employees"
+EMPLOYEE_IMAGE_UPLOADS_DIR = UPLOADS_DIR / "employees"
 EMPLOYEE_IMAGE_URL_PREFIX = "/static/uploads/employees"
 EMPLOYEE_IMAGE_ALLOWED_CONTENT_TYPES = {
     "image/gif": ".gif",

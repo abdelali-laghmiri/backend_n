@@ -11,6 +11,7 @@ from app.apps.admin_panel import admin_router
 from app.core.config import settings
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
+from app.shared.uploads import UPLOADS_DIR
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
@@ -68,6 +69,11 @@ def health_check() -> HealthResponse:
     return HealthResponse(status="ok", detail="Service is healthy.")
 
 
+app.mount(
+    "/static/uploads",
+    StaticFiles(directory=str(UPLOADS_DIR), check_dir=False),
+    name="uploads",
+)
 app.mount(
     "/static",
     StaticFiles(directory=str(STATIC_DIR)),
