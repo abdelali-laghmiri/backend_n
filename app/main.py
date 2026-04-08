@@ -11,7 +11,7 @@ from app.apps.admin_panel import admin_router
 from app.core.config import settings
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
-from app.shared.uploads import UPLOADS_DIR
+from app.shared.uploads import UPLOADS_DIR, ensure_uploads_dir_exists
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
@@ -23,6 +23,8 @@ app = FastAPI(
     debug=settings.debug,
     openapi_tags=API_TAGS,
 )
+
+ensure_uploads_dir_exists()
 
 browser_cors_allow_origins = settings.cors_allow_origins
 

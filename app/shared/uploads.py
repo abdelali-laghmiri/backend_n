@@ -32,6 +32,13 @@ class ManagedUploadValidationError(ValueError):
     """Raised when an uploaded file does not meet the managed-upload rules."""
 
 
+def ensure_uploads_dir_exists() -> Path:
+    """Create the managed uploads root before StaticFiles validates it."""
+
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    return UPLOADS_DIR
+
+
 @dataclass(slots=True)
 class StoredUploadFile:
     """Metadata returned after storing one managed upload on local disk."""
