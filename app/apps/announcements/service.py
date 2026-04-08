@@ -14,6 +14,7 @@ from app.apps.announcements.models import (
     AnnouncementTypeEnum,
     utcnow,
 )
+from app.apps.announcements.storage import build_announcement_attachment_access_url
 from app.apps.announcements.schemas import (
     AnnouncementAttachmentResponse,
     AnnouncementCreateRequest,
@@ -209,6 +210,34 @@ class AnnouncementsService:
             announcement,
             conflict_message="Failed to attach files to the announcement.",
         )
+
+    def get_attachment_for_user(
+        self,
+        announcement_id: int,
+        attachment_id: int,
+        current_user: User,
+        *,
+        include_all: bool = False,
+    ) -> AnnouncementAttachment:
+        """Return one attachment when its parent announcement is visible to the user."""
+
+        announcement = self.get_announcement_for_user(
+            announcement_id,
+            current_user,
+            include_all=include_all,
+        )
+        attachment = self.db.execute(
+            select(AnnouncementAttachment)
+            .where(
+                AnnouncementAttachment.id == attachment_id,
+                AnnouncementAttachment.announcement_id == announcement.id,
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if attachment is None:
+            raise AnnouncementsNotFoundError("Announcement attachment not found.")
+
+        return attachment
 
     def remove_attachment(
         self,
@@ -518,7 +547,10 @@ class AnnouncementsService:
         return AnnouncementAttachmentResponse(
             id=attachment.id,
             file_name=attachment.original_file_name,
-            file_url=attachment.file_url,
+            file_url=build_announcement_attachment_access_url(
+                attachment.announcement_id,
+                attachment.id,
+            ),
             content_type=attachment.content_type,
             file_extension=attachment.file_extension,
             file_size_bytes=attachment.file_size_bytes,

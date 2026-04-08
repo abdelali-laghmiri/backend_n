@@ -13,12 +13,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_announcements_bootstrap.db"
 
+from app.core.config import settings
 from app.apps.announcements.dependencies import get_announcements_service
 from app.apps.announcements.models import (
     Announcement,
+    AnnouncementAttachment,
     AnnouncementRead,
     AnnouncementTypeEnum,
 )
+import app.apps.announcements.router as announcements_router_module
+import app.apps.announcements.storage as announcement_storage_module
 from app.apps.announcements.router import router as announcements_router
 from app.apps.announcements.schemas import AnnouncementCreateRequest
 from app.apps.announcements.service import AnnouncementsService
@@ -28,6 +32,8 @@ from app.apps.setup.service import SetupService
 from app.apps.users.models import User
 from app.db.base import Base
 from app.shared import uploads as uploads_module
+
+API_PREFIX = settings.api_v1_prefix
 
 
 def _make_user(user_id: int) -> User:
@@ -62,18 +68,36 @@ class AnnouncementsTests(unittest.TestCase):
         self.service = AnnouncementsService(db=self.db)
         self.current_user = _make_user(900)
         self.author_user = _make_user(901)
+        self.other_user = _make_user(902)
         self.db.add(self.current_user)
         self.db.add(self.author_user)
+        self.db.add(self.other_user)
         self.db.commit()
 
         self.original_static_dir = uploads_module.STATIC_DIR
         self.original_uploads_dir = uploads_module.UPLOADS_DIR
+        self.original_attachment_storage_root = (
+            announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT
+        )
         uploads_module.STATIC_DIR = Path(self.temp_dir.name) / "static"
         uploads_module.UPLOADS_DIR = uploads_module.STATIC_DIR / "uploads"
+        attachment_storage_root = Path(self.temp_dir.name) / "protected_uploads"
+        announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
+            attachment_storage_root
+        )
+        announcements_router_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
+            attachment_storage_root
+        )
 
     def tearDown(self) -> None:
         uploads_module.STATIC_DIR = self.original_static_dir
         uploads_module.UPLOADS_DIR = self.original_uploads_dir
+        announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
+            self.original_attachment_storage_root
+        )
+        announcements_router_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
+            self.original_attachment_storage_root
+        )
         self.db.close()
         self.engine.dispose()
         self.temp_dir.cleanup()
@@ -114,7 +138,7 @@ class AnnouncementsTests(unittest.TestCase):
         )
 
         with self._build_test_client(allowed_permissions={"announcements.read"}) as client:
-            response = client.get("/announcements")
+            response = client.get(f"{API_PREFIX}/announcements")
 
             self.assertEqual(response.status_code, 200)
             payload = response.json()
@@ -129,7 +153,10 @@ class AnnouncementsTests(unittest.TestCase):
             published_at=datetime.now(timezone.utc) + timedelta(days=1),
         )
         with self._build_test_client(allowed_permissions={"announcements.read"}) as client:
-            response = client.get("/announcements", params={"include_all": "true"})
+            response = client.get(
+                f"{API_PREFIX}/announcements",
+                params={"include_all": "true"},
+            )
 
             self.assertEqual(response.status_code, 403)
             self.assertEqual(
@@ -143,7 +170,7 @@ class AnnouncementsTests(unittest.TestCase):
             allowed_permissions={"announcements.read", "announcements.update"}
         ) as client:
             response = client.post(
-                f"/announcements/{announcement.id}/attachments",
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments",
                 files=[
                     (
                         "files",
@@ -157,19 +184,135 @@ class AnnouncementsTests(unittest.TestCase):
             self.assertEqual(payload["attachments_count"], 1)
             attachment = payload["attachments"][0]
             self.assertEqual(attachment["file_name"], "policy.pdf")
-
-            stored_path = (
-                uploads_module.STATIC_DIR / attachment["file_url"].removeprefix("/static/")
+            self.assertEqual(
+                attachment["file_url"],
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments/{attachment['id']}",
             )
+
+            stored_record = self._get_attachment_record(attachment["id"])
+            self.assertIsNotNone(stored_record)
+            stored_path = announcement_storage_module.resolve_announcement_attachment_path(
+                stored_record
+            )
+            self.assertIsNotNone(stored_path)
             self.assertTrue(stored_path.exists())
 
+            open_response = client.get(attachment["file_url"])
+
+            self.assertEqual(open_response.status_code, 200)
+            self.assertEqual(open_response.content, b"%PDF-1.4 fake payload")
+
             delete_response = client.delete(
-                f"/announcements/{announcement.id}/attachments/{attachment['id']}"
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments/{attachment['id']}"
             )
 
             self.assertEqual(delete_response.status_code, 200)
             self.assertEqual(delete_response.json()["attachments_count"], 0)
             self.assertFalse(stored_path.exists())
+
+    def test_attachment_download_allows_other_reader(self) -> None:
+        announcement = self._create_announcement()
+        with self._build_test_client(
+            allowed_permissions={"announcements.read", "announcements.update"},
+            user_id=self.current_user.id,
+        ) as uploader_client:
+            upload_response = uploader_client.post(
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments",
+                files=[
+                    (
+                        "files",
+                        ("guide.pdf", b"shared attachment", "application/pdf"),
+                    )
+                ],
+            )
+
+            self.assertEqual(upload_response.status_code, 200)
+            attachment_url = upload_response.json()["attachments"][0]["file_url"]
+
+        with self._build_test_client(
+            allowed_permissions={"announcements.read"},
+            user_id=self.other_user.id,
+        ) as reader_client:
+            attachment_response = reader_client.get(attachment_url)
+
+        self.assertEqual(attachment_response.status_code, 200)
+        self.assertEqual(attachment_response.content, b"shared attachment")
+
+    def test_attachment_download_requires_read_permission(self) -> None:
+        announcement = self._create_announcement()
+        with self._build_test_client(
+            allowed_permissions={"announcements.read", "announcements.update"},
+            user_id=self.current_user.id,
+        ) as uploader_client:
+            upload_response = uploader_client.post(
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments",
+                files=[
+                    (
+                        "files",
+                        ("guide.pdf", b"shared attachment", "application/pdf"),
+                    )
+                ],
+            )
+
+            self.assertEqual(upload_response.status_code, 200)
+            attachment_url = upload_response.json()["attachments"][0]["file_url"]
+
+        with self._build_test_client(
+            allowed_permissions=set(),
+            user_id=self.other_user.id,
+        ) as unauthorized_client:
+            attachment_response = unauthorized_client.get(attachment_url)
+
+        self.assertEqual(attachment_response.status_code, 403)
+        self.assertEqual(
+            attachment_response.json()["detail"],
+            "Permission 'announcements.read' is required.",
+        )
+
+    def test_attachment_download_hides_unpublished_announcement_from_reader(self) -> None:
+        announcement = self._create_announcement(
+            published_at=datetime.now(timezone.utc) + timedelta(hours=1)
+        )
+        with self._build_test_client(
+            allowed_permissions={"announcements.read", "announcements.update"},
+            user_id=self.current_user.id,
+        ) as manager_client:
+            upload_response = manager_client.post(
+                f"{API_PREFIX}/announcements/{announcement.id}/attachments",
+                files=[
+                    (
+                        "files",
+                        ("guide.pdf", b"shared attachment", "application/pdf"),
+                    )
+                ],
+            )
+
+            self.assertEqual(upload_response.status_code, 200)
+            attachment_url = upload_response.json()["attachments"][0]["file_url"]
+
+        with self._build_test_client(
+            allowed_permissions={"announcements.read"},
+            user_id=self.other_user.id,
+        ) as reader_client:
+            attachment_response = reader_client.get(attachment_url)
+
+        self.assertEqual(attachment_response.status_code, 404)
+        self.assertEqual(
+            attachment_response.json()["detail"],
+            "Announcement not found.",
+        )
+
+    def test_delete_announcement_returns_empty_204_body(self) -> None:
+        announcement = self._create_announcement()
+
+        with self._build_test_client(
+            allowed_permissions={"announcements.delete"},
+            user_id=self.current_user.id,
+        ) as client:
+            response = client.delete(f"{API_PREFIX}/announcements/{announcement.id}")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")
 
     def test_setup_defaults_seed_announcement_permissions(self) -> None:
         default_permission_codes = {
@@ -254,10 +397,15 @@ class AnnouncementsTests(unittest.TestCase):
         self.db.refresh(announcement)
         return announcement
 
-    def _build_test_client(self, *, allowed_permissions: set[str]) -> TestClient:
+    def _build_test_client(
+        self,
+        *,
+        allowed_permissions: set[str],
+        user_id: int | None = None,
+    ) -> TestClient:
         app = FastAPI()
-        app.include_router(announcements_router)
-        request_user = _make_user(self.current_user.id)
+        app.include_router(announcements_router, prefix=API_PREFIX)
+        request_user = _make_user(user_id or self.current_user.id)
 
         class StubPermissionsService:
             def user_has_permission(self, _user: User, permission_code: str) -> bool:
@@ -274,6 +422,10 @@ class AnnouncementsTests(unittest.TestCase):
         app.dependency_overrides[get_current_active_user] = lambda: request_user
         app.dependency_overrides[get_permissions_service] = lambda: StubPermissionsService()
         return TestClient(app)
+
+    def _get_attachment_record(self, attachment_id: int) -> AnnouncementAttachment | None:
+        self.db.expire_all()
+        return self.db.get(AnnouncementAttachment, attachment_id)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.apps.announcements.dependencies import get_announcements_service
 from app.apps.announcements.schemas import (
@@ -16,13 +17,18 @@ from app.apps.announcements.service import (
     AnnouncementsService,
     AnnouncementsValidationError,
 )
+from app.apps.announcements.storage import (
+    ANNOUNCEMENT_ATTACHMENT_CATEGORY,
+    ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT,
+    delete_announcement_attachment_file,
+    resolve_announcement_attachment_path,
+)
 from app.apps.permissions.dependencies import get_permissions_service, require_permission
 from app.apps.permissions.service import PermissionsService
 from app.apps.users.models import User
 from app.shared.uploads import (
     ManagedUploadValidationError,
     StoredUploadFile,
-    delete_managed_upload,
     delete_managed_uploads,
     save_managed_upload,
 )
@@ -226,11 +232,45 @@ async def add_announcement_attachments(
     ) as exc:
         delete_managed_uploads(
             [upload.file_url for upload in stored_uploads],
-            category="announcements",
+            category=ANNOUNCEMENT_ATTACHMENT_CATEGORY,
+            storage_root=ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT,
         )
         raise_announcements_http_error(exc)
 
     return service.build_announcement_detail_response(announcement, current_user)
+
+
+@router.get(
+    "/{announcement_id}/attachments/{attachment_id}",
+    response_class=FileResponse,
+    summary="Open one announcement attachment",
+)
+def get_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    service: AnnouncementsService = Depends(get_announcements_service),
+    current_user: User = Depends(require_permission("announcements.read")),
+    permissions_service: PermissionsService = Depends(get_permissions_service),
+) -> FileResponse:
+    try:
+        attachment = service.get_attachment_for_user(
+            announcement_id,
+            attachment_id,
+            current_user,
+            include_all=_can_manage_announcements(current_user, permissions_service),
+        )
+        attachment_path = resolve_announcement_attachment_path(attachment)
+        if attachment_path is None or not attachment_path.exists():
+            raise AnnouncementsNotFoundError("Announcement attachment not found.")
+    except AnnouncementsNotFoundError as exc:
+        raise_announcements_http_error(exc)
+
+    return FileResponse(
+        attachment_path,
+        media_type=attachment.content_type,
+        filename=attachment.original_file_name,
+        content_disposition_type="inline",
+    )
 
 
 @router.delete(
@@ -262,7 +302,7 @@ def delete_announcement_attachment(
     ) as exc:
         raise_announcements_http_error(exc)
 
-    delete_managed_upload(file_url, category="announcements")
+    delete_announcement_attachment_file(file_url)
     return service.build_announcement_detail_response(announcement, current_user)
 
 
@@ -318,16 +358,18 @@ async def _store_announcement_uploads(
             stored_uploads.append(
                 await save_managed_upload(
                     upload,
-                    category="announcements",
+                    category=ANNOUNCEMENT_ATTACHMENT_CATEGORY,
                     allowed_content_types=ANNOUNCEMENT_ATTACHMENT_ALLOWED_CONTENT_TYPES,
                     allowed_suffixes=ANNOUNCEMENT_ATTACHMENT_ALLOWED_SUFFIXES,
                     max_bytes=ANNOUNCEMENT_ATTACHMENT_MAX_BYTES,
+                    storage_root=ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT,
                 )
             )
     except ManagedUploadValidationError as exc:
         delete_managed_uploads(
             [upload.file_url for upload in stored_uploads],
-            category="announcements",
+            category=ANNOUNCEMENT_ATTACHMENT_CATEGORY,
+            storage_root=ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -336,7 +378,8 @@ async def _store_announcement_uploads(
     except Exception:
         delete_managed_uploads(
             [upload.file_url for upload in stored_uploads],
-            category="announcements",
+            category=ANNOUNCEMENT_ATTACHMENT_CATEGORY,
+            storage_root=ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT,
         )
         raise
 

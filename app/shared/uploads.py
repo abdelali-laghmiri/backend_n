@@ -58,6 +58,7 @@ async def save_managed_upload(
     allowed_content_types: dict[str, str],
     allowed_suffixes: set[str],
     max_bytes: int,
+    storage_root: Path | None = None,
 ) -> StoredUploadFile:
     """Persist one uploaded file inside the managed static uploads directory."""
 
@@ -95,7 +96,8 @@ async def save_managed_upload(
 
     content_type = content_type or "application/octet-stream"
 
-    destination_dir = UPLOADS_DIR / category
+    destination_root = storage_root or UPLOADS_DIR
+    destination_dir = destination_root / category
     destination_dir.mkdir(parents=True, exist_ok=True)
     stored_file_name = f"{uuid4().hex}{file_extension}"
     destination = destination_dir / stored_file_name
@@ -111,10 +113,19 @@ async def save_managed_upload(
     )
 
 
-def delete_managed_upload(file_url: str | None, *, category: str | None = None) -> None:
+def delete_managed_upload(
+    file_url: str | None,
+    *,
+    category: str | None = None,
+    storage_root: Path | None = None,
+) -> None:
     """Delete one locally managed upload when it belongs to the expected directory."""
 
-    target = _resolve_managed_upload_path(file_url, category=category)
+    target = resolve_managed_upload_path(
+        file_url,
+        category=category,
+        storage_root=storage_root,
+    )
     if target is None or not target.exists():
         return
 
@@ -125,17 +136,23 @@ def delete_managed_uploads(
     file_urls: list[str],
     *,
     category: str | None = None,
+    storage_root: Path | None = None,
 ) -> None:
     """Delete multiple locally managed uploads, ignoring missing targets."""
 
     for file_url in file_urls:
-        delete_managed_upload(file_url, category=category)
+        delete_managed_upload(
+            file_url,
+            category=category,
+            storage_root=storage_root,
+        )
 
 
-def _resolve_managed_upload_path(
+def resolve_managed_upload_path(
     file_url: str | None,
     *,
     category: str | None = None,
+    storage_root: Path | None = None,
 ) -> Path | None:
     """Resolve a managed upload URL to a safe local file path when possible."""
 
@@ -143,14 +160,15 @@ def _resolve_managed_upload_path(
         return None
 
     relative_path = Path(file_url.removeprefix(f"{UPLOADS_URL_PREFIX}/"))
-    target = (UPLOADS_DIR / relative_path).resolve()
-    uploads_root = UPLOADS_DIR.resolve()
+    uploads_base = storage_root or UPLOADS_DIR
+    target = (uploads_base / relative_path).resolve()
+    uploads_root = uploads_base.resolve()
 
     if not _is_relative_to(target, uploads_root):
         return None
 
     if category is not None:
-        expected_root = (UPLOADS_DIR / category).resolve()
+        expected_root = (uploads_base / category).resolve()
         if not _is_relative_to(target, expected_root):
             return None
 

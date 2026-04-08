@@ -190,7 +190,7 @@ Content type: `multipart/form-data`
     {
       "id": 31,
       "file_name": "hr-policy-v2.pdf",
-      "file_url": "/static/uploads/announcements/f481f3cdb8d14f0ea4475956e31fbb6a.pdf",
+      "file_url": "/api/v1/announcements/12/attachments/31",
       "content_type": "application/pdf",
       "file_extension": ".pdf",
       "file_size_bytes": 248192,
@@ -199,7 +199,7 @@ Content type: `multipart/form-data`
     {
       "id": 32,
       "file_name": "faq.xlsx",
-      "file_url": "/static/uploads/announcements/abcf13f2f4cd44fca4f8f9505f28a6a1.xlsx",
+      "file_url": "/api/v1/announcements/12/attachments/32",
       "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "file_extension": ".xlsx",
       "file_size_bytes": 58121,
@@ -379,7 +379,8 @@ Do not assume:
 - `attachments` only appear in detail responses
 - each attachment contains `file_url`, `content_type`, and `file_extension`
 - use `file_extension` or `content_type` to choose icons
-- the backend stores files using the local static upload convention, so the frontend can open `file_url` directly
+- `file_url` is an authenticated backend route that validates announcement read access before serving the file
+- the frontend should open `file_url` with the same authenticated session used for announcement API calls
 
 ### Permission Codes
 
@@ -415,4 +416,4 @@ Default setup-role seeding in this repository:
 - The public feed never returns inactive, unpublished, or expired announcements unless a management user explicitly calls `include_all=true`.
 - `PUT` is a full update body, not a partial patch.
 - Attachments are managed in separate endpoints, not inline inside the create or update JSON payload.
-- Attachment files currently use the local static upload convention. The frontend should not assume private signed URLs or object storage semantics yet.
+- Attachment files are served through an authenticated announcement route. The frontend should not assume public static URLs, signed URLs, or object storage semantics.
