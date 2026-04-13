@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -69,6 +69,14 @@ def read_root() -> HealthResponse:
 )
 def health_check() -> HealthResponse:
     return HealthResponse(status="ok", detail="Service is healthy.")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """Serve a minimal inline favicon to avoid 404s on admin UI."""
+
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' ry='12' fill='#0ea5e9'/><text x='32' y='42' text-anchor='middle' font-size='32' fill='white' font-family='Arial, sans-serif'>HR</text></svg>"""
+    return Response(content=svg, media_type="image/svg+xml")
 
 
 app.mount(

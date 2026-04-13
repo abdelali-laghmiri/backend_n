@@ -25,10 +25,10 @@ RUN chmod +x /app/scripts/entrypoint.sh \
 
 USER appuser
 
-EXPOSE 8000
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import os; from urllib.request import urlopen; port = os.getenv('PORT', '8000'); urlopen(f'http://127.0.0.1:{port}/health').read()"
+    CMD python -c "import os; from urllib.request import urlopen; port = os.getenv('PORT', '8080'); urlopen(f'http://127.0.0.1:{port}/health').read()"
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["python", "-m", "app.server"]

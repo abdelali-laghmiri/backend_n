@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.apps.announcements.router import router as announcements_router
 from app.apps.attendance.router import router as attendance_router
 from app.apps.auth.router import router as auth_router
+from app.apps.messages.router import router as messages_router
 from app.apps.dashboard.router import router as dashboard_router
 from app.apps.employees.router import router as employees_router
 from app.apps.notifications.router import router as notifications_router
@@ -23,6 +24,7 @@ api_router.include_router(users_router)
 api_router.include_router(organization_router)
 api_router.include_router(employees_router)
 api_router.include_router(notifications_router)
+api_router.include_router(messages_router)
 api_router.include_router(announcements_router)
 api_router.include_router(permissions_router)
 api_router.include_router(requests_router)

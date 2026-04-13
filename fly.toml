@@ -16,8 +16,17 @@ primary_region = 'ams'
   min_machines_running = 0
   processes = ['app']
 
+[env]
+  PORT = "8080"
+  MANAGED_ANNOUNCEMENT_ATTACHMENTS_DIR = "/data/protected_uploads"
+  MANAGED_UPLOADS_DIR = "/data/uploads"
+
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 256
+
+[[mounts]]
+  source = "ann_uploads"
+  destination = "/data"
