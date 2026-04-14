@@ -6,6 +6,7 @@ from app.apps.messages.dependencies import get_messages_service
 from app.apps.messages.schemas import (
     MessageCreateRequest,
     MessageListItemResponse,
+    MessageRecipientCandidateResponse,
     MessageResponse,
     MessageTemplateCreateRequest,
     MessageTemplateResponse,
@@ -19,7 +20,7 @@ from app.apps.messages.service import (
     MessagesService,
     MessagesValidationError,
 )
-from app.apps.permissions.dependencies import require_permission
+from app.apps.permissions.dependencies import require_any_permission, require_permission
 from app.apps.users.models import User
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
@@ -62,7 +63,13 @@ def raise_messages_http_error(exc: Exception) -> None:
 def send_message(
     payload: MessageCreateRequest,
     service: MessagesService = Depends(get_messages_service),
-    current_user: User = Depends(require_permission("messages.send")),
+    current_user: User = Depends(
+        require_any_permission(
+            "messages.send_all",
+            "messages.send_same_or_down",
+            "messages.send",
+        )
+    ),
 ) -> MessageResponse:
     try:
         message = service.send_message(current_user, payload)
@@ -86,7 +93,14 @@ def reply_to_message(
     message_id: int,
     payload: MessageCreateRequest,
     service: MessagesService = Depends(get_messages_service),
-    current_user: User = Depends(require_permission("messages.send")),
+    current_user: User = Depends(
+        require_any_permission(
+            "messages.reply",
+            "messages.send_all",
+            "messages.send_same_or_down",
+            "messages.send",
+        )
+    ),
 ) -> MessageResponse:
     try:
         payload_with_parent = MessageCreateRequest(
@@ -103,6 +117,26 @@ def reply_to_message(
         MessagesNotFoundError,
         MessagesValidationError,
     ) as exc:
+        raise_messages_http_error(exc)
+
+
+@router.get(
+    "/users",
+    response_model=list[MessageRecipientCandidateResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List users available for message composition",
+)
+def list_available_recipient_users(
+    q: str | None = Query(default=None, max_length=120),
+    limit: int | None = Query(default=100, ge=1, le=300),
+    service: MessagesService = Depends(get_messages_service),
+    current_user: User = Depends(
+        require_any_permission("messages.read_users", "messages.send")
+    ),
+) -> list[MessageRecipientCandidateResponse]:
+    try:
+        return service.list_available_recipients(current_user, q=q, limit=limit)
+    except MessagesAuthorizationError as exc:
         raise_messages_http_error(exc)
 
 

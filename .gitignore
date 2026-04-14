@@ -50,3 +50,5 @@ app/static/uploads/employees/*
 
 # Alembic bytecode
 alembic/versions/*.pyc
+
+.vercel

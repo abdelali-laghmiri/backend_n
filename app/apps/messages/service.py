@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.apps.employees.models import Employee
 from app.apps.messages.models import (
     Message,
     MessagePermissionEnum,
@@ -17,6 +18,7 @@ from app.apps.messages.models import (
 from app.apps.messages.schemas import (
     MessageCreateRequest,
     MessageListItemResponse,
+    MessageRecipientCandidateResponse,
     MessageRecipientResponse,
     MessageRecipientInput,
     MessageResponse,
@@ -28,6 +30,8 @@ from app.apps.messages.schemas import (
 )
 from app.apps.notifications.models import NotificationTypeEnum
 from app.apps.notifications.service import NotificationsService
+from app.apps.organization.models import Department, JobTitle, Team
+from app.apps.permissions.service import PermissionsService
 from app.apps.users.models import User
 
 
@@ -53,22 +57,55 @@ class _NormalizedRecipient:
     permission: MessagePermissionEnum
 
 
+@dataclass(frozen=True)
+class _MessagingAccessPolicy:
+    can_read_users: bool
+    can_send_all: bool
+    can_send_same_or_down: bool
+    can_reply: bool
+    has_legacy_send: bool
+
+    @property
+    def can_initiate(self) -> bool:
+        return self.can_send_all or self.can_send_same_or_down or self.has_legacy_send
+
+    @property
+    def can_send_to_anyone(self) -> bool:
+        return self.can_send_all or self.has_legacy_send
+
+    @property
+    def can_reply_in_thread(self) -> bool:
+        return self.can_reply or self.can_initiate
+
+
 class MessagesService:
     """Service layer for internal mail messages and templates."""
 
-    def __init__(self, db: Session, notifications_service: NotificationsService) -> None:
+    def __init__(
+        self,
+        db: Session,
+        notifications_service: NotificationsService,
+        permissions_service: PermissionsService,
+    ) -> None:
         self.db = db
         self.notifications_service = notifications_service
+        self.permissions_service = permissions_service
 
     # Message composition -------------------------------------------------
     def send_message(self, sender: User, payload: MessageCreateRequest) -> Message:
         """Compose a new message or reply and deliver to recipients."""
 
+        access_policy = self._get_access_policy(sender)
         recipients = self._normalize_recipients(payload.recipients)
 
         parent_message = None
         conversation_id = None
         if payload.parent_message_id is not None:
+            if not access_policy.can_reply_in_thread:
+                raise MessagesAuthorizationError(
+                    "You do not have permission to reply to messages."
+                )
+
             parent_message = self._get_message_for_user(
                 payload.parent_message_id,
                 sender,
@@ -78,6 +115,17 @@ class MessagesService:
                 raise MessagesAuthorizationError("You cannot reply to this message.")
 
             conversation_id = parent_message.conversation_id or parent_message.id
+        elif not access_policy.can_initiate:
+            raise MessagesAuthorizationError(
+                "You do not have permission to send new messages."
+            )
+
+        self._ensure_recipients_allowed(
+            sender,
+            recipients,
+            access_policy=access_policy,
+            parent_message=parent_message,
+        )
 
         message = Message(
             subject=payload.subject,
@@ -110,6 +158,106 @@ class MessagesService:
 
         self._send_notifications(message, recipients)
         return message
+
+    def list_available_recipients(
+        self,
+        current_user: User,
+        *,
+        q: str | None = None,
+        limit: int | None = None,
+    ) -> list[MessageRecipientCandidateResponse]:
+        access_policy = self._get_access_policy(current_user)
+        if not access_policy.can_read_users:
+            raise MessagesAuthorizationError("Permission 'messages.read_users' is required.")
+
+        if access_policy.can_send_to_anyone:
+            scoped_user_ids: set[int] | None = None
+        elif access_policy.can_send_same_or_down:
+            scoped_user_ids = self._get_same_or_down_user_ids(current_user)
+            if not scoped_user_ids:
+                return []
+        else:
+            return []
+
+        statement = (
+            select(
+                User.id,
+                User.matricule,
+                User.first_name,
+                User.last_name,
+                Department.name.label("department"),
+                Team.name.label("team"),
+                JobTitle.name.label("job_title"),
+                JobTitle.hierarchical_level.label("hierarchical_level"),
+            )
+            .select_from(User)
+            .outerjoin(
+                Employee,
+                and_(
+                    Employee.user_id == User.id,
+                    Employee.is_active.is_(True),
+                ),
+            )
+            .outerjoin(
+                JobTitle,
+                and_(
+                    JobTitle.id == Employee.job_title_id,
+                    JobTitle.is_active.is_(True),
+                ),
+            )
+            .outerjoin(Department, Department.id == Employee.department_id)
+            .outerjoin(Team, Team.id == Employee.team_id)
+            .where(User.is_active.is_(True))
+        )
+
+        if scoped_user_ids is not None:
+            statement = statement.where(User.id.in_(scoped_user_ids))
+
+        normalized_query = q.strip() if q is not None else ""
+        if normalized_query:
+            search_value = f"%{normalized_query}%"
+            statement = statement.where(
+                or_(
+                    User.matricule.ilike(search_value),
+                    User.first_name.ilike(search_value),
+                    User.last_name.ilike(search_value),
+                    Department.name.ilike(search_value),
+                    Team.name.ilike(search_value),
+                    JobTitle.name.ilike(search_value),
+                )
+            )
+
+        statement = statement.order_by(
+            User.first_name.asc(),
+            User.last_name.asc(),
+            User.matricule.asc(),
+        )
+        if limit is not None:
+            statement = statement.limit(limit)
+
+        rows = self.db.execute(statement).all()
+        candidates: list[MessageRecipientCandidateResponse] = []
+        for row in rows:
+            full_name = " ".join(
+                part.strip()
+                for part in (row.first_name, row.last_name)
+                if part and part.strip()
+            ) or row.matricule
+            candidates.append(
+                MessageRecipientCandidateResponse(
+                    id=row.id,
+                    matricule=row.matricule,
+                    first_name=row.first_name,
+                    last_name=row.last_name,
+                    full_name=full_name,
+                    department=row.department,
+                    team=row.team,
+                    job_title=row.job_title,
+                    hierarchical_level=row.hierarchical_level,
+                )
+            )
+
+        return candidates
 
     # Message reads -------------------------------------------------------
     def mark_as_read(self, message_id: int, current_user: User) -> Message:
@@ -334,6 +482,124 @@ class MessagesService:
             raise MessagesValidationError("At least one recipient is required.")
 
         return normalized
+
+    def _get_access_policy(self, user: User) -> _MessagingAccessPolicy:
+        return _MessagingAccessPolicy(
+            can_read_users=self.permissions_service.user_has_permission(
+                user,
+                "messages.read_users",
+            )
+            or self.permissions_service.user_has_permission(user, "messages.send"),
+            can_send_all=self.permissions_service.user_has_permission(
+                user,
+                "messages.send_all",
+            ),
+            can_send_same_or_down=self.permissions_service.user_has_permission(
+                user,
+                "messages.send_same_or_down",
+            ),
+            can_reply=self.permissions_service.user_has_permission(user, "messages.reply"),
+            has_legacy_send=self.permissions_service.user_has_permission(
+                user,
+                "messages.send",
+            ),
+        )
+
+    def _ensure_recipients_allowed(
+        self,
+        sender: User,
+        recipients: list[_NormalizedRecipient],
+        *,
+        access_policy: _MessagingAccessPolicy,
+        parent_message: Message | None,
+    ) -> None:
+        recipient_ids = {recipient.user_id for recipient in recipients}
+        if not recipient_ids:
+            return
+
+        if access_policy.can_send_to_anyone:
+            return
+
+        if access_policy.can_send_same_or_down:
+            allowed_user_ids = self._get_same_or_down_user_ids(sender)
+            disallowed_user_ids = sorted(recipient_ids - allowed_user_ids)
+            if disallowed_user_ids:
+                raise MessagesAuthorizationError(
+                    "You can only message users from the same hierarchy level or below."
+                )
+            return
+
+        if parent_message is not None and access_policy.can_reply:
+            participant_user_ids = self._get_conversation_participant_user_ids(
+                parent_message
+            )
+            disallowed_user_ids = sorted(recipient_ids - participant_user_ids)
+            if disallowed_user_ids:
+                raise MessagesAuthorizationError(
+                    "Reply recipients must belong to the current conversation participants."
+                )
+            return
+
+        raise MessagesAuthorizationError("You do not have permission to send messages.")
+
+    def _get_same_or_down_user_ids(self, sender: User) -> set[int]:
+        sender_level = self._get_user_hierarchical_level(sender.id)
+        if sender_level is None:
+            raise MessagesAuthorizationError(
+                "Your hierarchy level could not be resolved for messaging scope."
+            )
+
+        statement = (
+            select(Employee.user_id)
+            .select_from(Employee)
+            .join(User, User.id == Employee.user_id)
+            .join(JobTitle, JobTitle.id == Employee.job_title_id)
+            .where(
+                Employee.is_active.is_(True),
+                User.is_active.is_(True),
+                JobTitle.is_active.is_(True),
+                JobTitle.hierarchical_level <= sender_level,
+            )
+        )
+        return set(self.db.execute(statement).scalars().all())
+
+    def _get_user_hierarchical_level(self, user_id: int) -> int | None:
+        statement = (
+            select(JobTitle.hierarchical_level)
+            .select_from(Employee)
+            .join(JobTitle, JobTitle.id == Employee.job_title_id)
+            .where(
+                Employee.user_id == user_id,
+                Employee.is_active.is_(True),
+                JobTitle.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        return self.db.execute(statement).scalar_one_or_none()
+
+    def _get_conversation_participant_user_ids(self, message: Message) -> set[int]:
+        conversation_id = message.conversation_id or message.id
+        message_rows = self.db.execute(
+            select(Message.id, Message.sender_user_id).where(
+                or_(
+                    Message.conversation_id == conversation_id,
+                    Message.id == conversation_id,
+                )
+            )
+        ).all()
+
+        if not message_rows:
+            return {message.sender_user_id}
+
+        message_ids = [row.id for row in message_rows]
+        participant_user_ids = {row.sender_user_id for row in message_rows}
+        recipient_user_ids = self.db.execute(
+            select(MessageRecipient.recipient_user_id).where(
+                MessageRecipient.message_id.in_(message_ids)
+            )
+        ).scalars()
+        participant_user_ids.update(recipient_user_ids)
+        return participant_user_ids
 
     def _user_can_reply(self, message: Message, user: User) -> bool:
         if message.sender_user_id == user.id:

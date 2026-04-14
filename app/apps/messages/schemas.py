@@ -29,6 +29,20 @@ class UserSummary(BaseModel):
     full_name: str
 
 
+class MessageRecipientCandidateResponse(BaseModel):
+    """Selectable recipient returned for message composition."""
+
+    id: int
+    matricule: str
+    first_name: str
+    last_name: str
+    full_name: str
+    department: str | None = None
+    team: str | None = None
+    job_title: str | None = None
+    hierarchical_level: int | None = None
+
+
 class MessageRecipientInput(BaseModel):
     """Recipient payload for message creation."""
 
