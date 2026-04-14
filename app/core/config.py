@@ -97,6 +97,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="SUPERADMIN_EMAIL",
     )
+    nfc_app_url: str | None = Field(
+        default=None,
+        validation_alias="NFC_APP_URL",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
@@ -90,6 +90,7 @@ from app.apps.setup.service import (
     SetupInitializationError,
     SetupValidationError,
 )
+from app.apps.auth.dependencies import get_current_super_admin
 from app.apps.users.models import User
 from app.shared.uploads import UPLOADS_DIR
 
@@ -4572,4 +4573,73 @@ def admin_performance_record_detail(
             {"label": "Created at", "value": record.created_at},
             {"label": "Updated at", "value": record.updated_at},
         ],
+    )
+
+
+NFC_APP_VERCEL_URL = "https://nfc-selector-app.vercel.app"
+
+
+@router.get("/app/download", tags=["App"])
+async def get_app_download_info(
+    current_user: User = Depends(get_current_super_admin),
+) -> JSONResponse:
+    """Get NFC Selector app download information (super admin only)."""
+    from app.core.config import settings
+    
+    app_url = settings.nfc_app_url or NFC_APP_VERCEL_URL
+    backend_url = "https://backend-n-lac.vercel.app"
+    
+    return JSONResponse(
+        content={
+            "app_name": "NFC Selector",
+            "description": "NFC-based employee selection app for attendance/check-in",
+            "platforms": ["Web (PWA)", "Android", "iOS"],
+            "install_url": app_url,
+            "backend_url": backend_url,
+            "version": "1.0.0",
+        }
+    )
+
+
+@router.get("/app/download/android", tags=["App"])
+async def download_android_app(
+    current_user: User = Depends(get_current_super_admin),
+) -> RedirectResponse:
+    """Redirect to Android app download (super admin only)."""
+    from app.core.config import settings
+    app_url = settings.nfc_app_url or NFC_APP_VERCEL_URL
+    return RedirectResponse(url=app_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/app/download/ios", tags=["App"])
+async def download_ios_app(
+    current_user: User = Depends(get_current_super_admin),
+) -> RedirectResponse:
+    """Redirect to iOS app download (super admin only)."""
+    from app.core.config import settings
+    app_url = settings.nfc_app_url or NFC_APP_VERCEL_URL
+    return RedirectResponse(url=app_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/app/download/web", tags=["App"])
+async def download_web_app(
+    current_user: User = Depends(get_current_super_admin),
+) -> RedirectResponse:
+    """Redirect to Web app (super admin only)."""
+    from app.core.config import settings
+    app_url = settings.nfc_app_url or NFC_APP_VERCEL_URL
+    return RedirectResponse(url=app_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/nfc/test", tags=["NFC"])
+async def test_nfc_endpoint(
+    current_user: User = Depends(get_current_active_user),
+) -> JSONResponse:
+    """Test endpoint to verify NFC app authentication."""
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "user": current_user.matricule,
+            "is_super_admin": current_user.is_super_admin,
+        }
     )
