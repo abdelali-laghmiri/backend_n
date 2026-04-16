@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.apps import api_router
 from app.apps.admin_panel import admin_router
+from app.apps.scanner_app.origins import get_merged_browser_origins
 from app.core.config import settings
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
@@ -26,7 +27,7 @@ app = FastAPI(
 
 ensure_uploads_dir_exists()
 
-browser_cors_allow_origins = settings.cors_allow_origins
+browser_cors_allow_origins = get_merged_browser_origins(settings)
 
 if browser_cors_allow_origins:
     # CORS applies only to browser-based cross-origin requests.

@@ -27,6 +27,8 @@ class LoginRequest(BaseModel):
 
     matricule: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=255)
+    issue_refresh_token: bool = False
+    device_id: str | None = Field(default=None, max_length=120)
 
 
 class LoginResponse(BaseModel):
@@ -35,6 +37,26 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
+    refresh_token: str | None = None
+    refresh_expires_in: int | None = None
+    user: AuthenticatedUserResponse
+
+
+class RefreshTokenRequest(BaseModel):
+    """Request schema for refreshing an access token."""
+
+    refresh_token: str = Field(min_length=1, max_length=500)
+    device_id: str | None = Field(default=None, max_length=120)
+
+
+class RefreshTokenResponse(BaseModel):
+    """Response schema for a successful refresh token exchange."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    refresh_token: str
+    refresh_expires_in: int
     user: AuthenticatedUserResponse
 
 

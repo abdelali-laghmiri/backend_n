@@ -24,7 +24,7 @@ from app.apps.attendance.service import (
     AttendanceService,
     AttendanceValidationError,
 )
-from app.apps.permissions.dependencies import require_permission
+from app.apps.permissions.dependencies import require_any_permission, require_permission
 from app.apps.users.models import User
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
@@ -101,7 +101,9 @@ def ingest_scan_event(
 def ingest_nfc_scan_event(
     payload: AttendanceNfcScanIngestRequest,
     service: AttendanceService = Depends(get_attendance_service),
-    _current_user: User = Depends(require_permission("attendance.ingest")),
+    _current_user: User = Depends(
+        require_any_permission("attendance.nfc.ingest", "attendance.ingest")
+    ),
 ) -> AttendanceScanIngestResponse:
     try:
         raw_event, daily_summary = service.ingest_nfc_scan_event(payload)

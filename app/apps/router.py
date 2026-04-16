@@ -13,6 +13,7 @@ from app.apps.organization.router import router as organization_router
 from app.apps.permissions.router import router as permissions_router
 from app.apps.performance.router import router as performance_router
 from app.apps.requests.router import router as requests_router
+from app.apps.scanner_app.router import router as scanner_app_router
 from app.apps.setup.router import router as setup_router
 from app.apps.users.router import router as users_router
 
@@ -31,3 +32,4 @@ api_router.include_router(requests_router)
 api_router.include_router(attendance_router)
 api_router.include_router(performance_router)
 api_router.include_router(dashboard_router)
+api_router.include_router(scanner_app_router)

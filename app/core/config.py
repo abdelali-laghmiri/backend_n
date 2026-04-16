@@ -57,6 +57,11 @@ class Settings(BaseSettings):
         validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES",
         gt=0,
     )
+    refresh_token_expire_days: int = Field(
+        default=30,
+        validation_alias="REFRESH_TOKEN_EXPIRE_DAYS",
+        gt=0,
+    )
     db_echo: bool = Field(
         default=False,
         validation_alias=AliasChoices("DB_ECHO", "APP_DB_ECHO"),
@@ -100,6 +105,18 @@ class Settings(BaseSettings):
     nfc_app_url: str | None = Field(
         default=None,
         validation_alias="NFC_APP_URL",
+    )
+    scanner_android_package_url: str | None = Field(
+        default=None,
+        validation_alias="SCANNER_ANDROID_PACKAGE_URL",
+    )
+    scanner_windows_package_url: str | None = Field(
+        default=None,
+        validation_alias="SCANNER_WINDOWS_PACKAGE_URL",
+    )
+    scanner_linux_package_url: str | None = Field(
+        default=None,
+        validation_alias="SCANNER_LINUX_PACKAGE_URL",
     )
 
     model_config = SettingsConfigDict(

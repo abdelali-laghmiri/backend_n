@@ -290,6 +290,12 @@ class SetupService:
             "module": "attendance",
         },
         {
+            "code": "attendance.nfc.ingest",
+            "name": "Ingest NFC attendance events",
+            "description": "Submit NFC scan events from the dedicated scanner application.",
+            "module": "attendance",
+        },
+        {
             "code": "attendance.nfc.assign_card",
             "name": "Assign NFC cards",
             "description": "Attach NFC cards to employees for attendance identification.",
@@ -367,6 +373,7 @@ class SetupService:
             "requests.read_all",
             "attendance.read",
             "attendance.ingest",
+            "attendance.nfc.ingest",
             "attendance.nfc.assign_card",
             "attendance.reports.generate",
             "performance.read",

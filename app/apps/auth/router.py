@@ -9,12 +9,15 @@ from app.apps.auth.schemas import (
     ChangePasswordResponse,
     LoginRequest,
     LoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
 )
 from app.apps.auth.service import (
     AuthService,
     AuthenticationError,
     InactiveUserError,
     PasswordChangeError,
+    RefreshTokenError,
 )
 from app.apps.permissions.dependencies import get_permissions_service
 from app.apps.permissions.service import PermissionsService
@@ -73,9 +76,53 @@ def login(
         ) from exc
 
     access_token, expires_in = service.create_access_token_for_user(user)
+    refresh_token: str | None = None
+    refresh_expires_in: int | None = None
+
+    if payload.issue_refresh_token:
+        refresh_token, refresh_expires_in = service.create_refresh_token_session(
+            user=user,
+            device_id=payload.device_id,
+        )
+
     return LoginResponse(
         access_token=access_token,
         expires_in=expires_in,
+        refresh_token=refresh_token,
+        refresh_expires_in=refresh_expires_in,
+        user=build_authenticated_user_response(user, permissions_service),
+    )
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshTokenResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Rotate a refresh token and issue a fresh access token",
+)
+def refresh_access_token(
+    payload: RefreshTokenRequest,
+    service: AuthService = Depends(get_auth_service),
+    permissions_service: PermissionsService = Depends(get_permissions_service),
+) -> RefreshTokenResponse:
+    try:
+        user, refresh_token, refresh_expires_in = service.rotate_refresh_token(
+            refresh_token=payload.refresh_token,
+            device_id=payload.device_id,
+        )
+    except (RefreshTokenError, InactiveUserError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    access_token, expires_in = service.create_access_token_for_user(user)
+    return RefreshTokenResponse(
+        access_token=access_token,
+        expires_in=expires_in,
+        refresh_token=refresh_token,
+        refresh_expires_in=refresh_expires_in,
         user=build_authenticated_user_response(user, permissions_service),
     )
 

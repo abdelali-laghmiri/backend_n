@@ -90,7 +90,7 @@ from app.apps.setup.service import (
     SetupInitializationError,
     SetupValidationError,
 )
-from app.apps.auth.dependencies import get_current_super_admin
+from app.apps.auth.dependencies import get_current_active_user, get_current_super_admin
 from app.apps.users.models import User
 from app.shared.uploads import UPLOADS_DIR
 

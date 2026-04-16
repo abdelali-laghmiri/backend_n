@@ -1,1 +1,0 @@
-https://nfc-selector-app.vercel.app

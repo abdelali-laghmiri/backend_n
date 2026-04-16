@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.apps.auth.models import AuthRefreshTokenSession
 from app.apps.users.models import User
 from app.core.config import Settings
 from app.core.security import JWTManager, PasswordManager, TokenValidationError
@@ -20,6 +23,10 @@ class InactiveUserError(RuntimeError):
 
 class PasswordChangeError(RuntimeError):
     """Raised when a password change request is invalid."""
+
+
+class RefreshTokenError(RuntimeError):
+    """Raised when a refresh token exchange fails."""
 
 
 class AuthService:
@@ -53,6 +60,80 @@ class AuthService:
             extra_claims={"matricule": user.matricule},
         )
         return token, expires_in
+
+    def create_refresh_token_session(
+        self,
+        *,
+        user: User,
+        device_id: str | None = None,
+    ) -> tuple[str, int]:
+        """Create a long-lived refresh token session for scanner clients."""
+
+        refresh_token = self._generate_refresh_token()
+        token_hash = self._hash_refresh_token(refresh_token)
+        expires_delta = timedelta(days=self.settings.refresh_token_expire_days)
+        expires_at = datetime.now(timezone.utc) + expires_delta
+
+        session = AuthRefreshTokenSession(
+            user_id=user.id,
+            token_hash=token_hash,
+            device_id=device_id,
+            expires_at=expires_at,
+        )
+        self.db.add(session)
+        self.db.commit()
+
+        return refresh_token, int(expires_delta.total_seconds())
+
+    def rotate_refresh_token(
+        self,
+        *,
+        refresh_token: str,
+        device_id: str | None = None,
+    ) -> tuple[User, str, int]:
+        """Rotate a valid refresh token and return a new one."""
+
+        token_hash = self._hash_refresh_token(refresh_token)
+        statement = (
+            select(AuthRefreshTokenSession)
+            .where(AuthRefreshTokenSession.token_hash == token_hash)
+            .limit(1)
+        )
+        session = self.db.execute(statement).scalar_one_or_none()
+        if session is None:
+            raise RefreshTokenError("Refresh token is invalid.")
+
+        now = datetime.now(timezone.utc)
+        if session.revoked_at is not None:
+            raise RefreshTokenError("Refresh token has been revoked.")
+        if session.expires_at <= now:
+            raise RefreshTokenError("Refresh token has expired.")
+        if device_id and session.device_id and device_id != session.device_id:
+            raise RefreshTokenError("Refresh token does not match this device.")
+
+        user = self.get_user_by_id(session.user_id)
+        if user is None:
+            raise RefreshTokenError("User for refresh token no longer exists.")
+        self.ensure_active_user(user)
+
+        session.revoked_at = now
+        session.last_used_at = now
+        self.db.add(session)
+
+        next_refresh_token = self._generate_refresh_token()
+        next_token_hash = self._hash_refresh_token(next_refresh_token)
+        expires_delta = timedelta(days=self.settings.refresh_token_expire_days)
+
+        next_session = AuthRefreshTokenSession(
+            user_id=user.id,
+            token_hash=next_token_hash,
+            device_id=device_id or session.device_id,
+            expires_at=now + expires_delta,
+        )
+        self.db.add(next_session)
+        self.db.commit()
+
+        return user, next_refresh_token, int(expires_delta.total_seconds())
 
     def get_authenticated_user_from_token(self, token: str) -> User:
         """Resolve the authenticated user from a JWT access token."""
@@ -115,3 +196,9 @@ class AuthService:
 
         statement = select(User).where(User.id == user_id).limit(1)
         return self.db.execute(statement).scalar_one_or_none()
+
+    def _generate_refresh_token(self) -> str:
+        return secrets.token_urlsafe(48)
+
+    def _hash_refresh_token(self, refresh_token: str) -> str:
+        return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
