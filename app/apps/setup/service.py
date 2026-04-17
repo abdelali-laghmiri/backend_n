@@ -116,6 +116,12 @@ class SetupService:
             "module": "organization",
         },
         {
+            "code": "organization.company_hierarchy",
+            "name": "View company hierarchy",
+            "description": "View the full company organigram and hierarchy tree.",
+            "module": "organization",
+        },
+        {
             "code": "organization.create",
             "name": "Create organization records",
             "description": "Create departments, teams, and job titles.",
@@ -337,6 +343,21 @@ class SetupService:
             "description": "Access dashboard data without scope restrictions.",
             "module": "dashboard",
         },
+        # ========== DASHBOARD ANALYTICS PERMISSIONS ==========
+        {
+            "code": "dashboard.analytics.read",
+            "name": "Read dashboard analytics",
+            "description": "View dashboard analytics widgets and summaries.",
+            "module": "dashboard",
+        },
+        # ========== PROFILE PERMISSIONS ==========
+        {
+            "code": "profile.view",
+            "name": "View profile",
+            "description": "View user profile information.",
+            "module": "profile",
+        },
+        # ========== ADMIN PANEL ==========
         {
             "code": "admin_panel.access",
             "name": "Access admin panel",
