@@ -715,12 +715,18 @@ class SetupService:
         self._persist_wizard_state(wizard_state)
         return self.get_job_titles_summary()
 
-    def ensure_permission_catalog(self) -> dict[str, Any]:
+    def ensure_permission_catalog(
+        self,
+        *,
+        enforce_wizard_writable: bool = True,
+        update_wizard_state: bool = True,
+    ) -> dict[str, Any]:
         """Create or refresh the initial permission catalog."""
 
-        self._ensure_wizard_writable()
+        if enforce_wizard_writable:
+            self._ensure_wizard_writable()
 
-        wizard_state = self.get_wizard_state()
+        wizard_state = self.get_wizard_state() if update_wizard_state else {}
         permission_ids_by_code: dict[str, int] = {}
         stored_permission_ids = wizard_state.get("permissions", {}).get("codes", {})
 
@@ -731,18 +737,25 @@ class SetupService:
             )
             permission_ids_by_code[permission.code] = permission.id
 
-        wizard_state["permissions"] = {"codes": permission_ids_by_code}
-        wizard_state["last_completed_step"] = max(
-            int(wizard_state.get("last_completed_step", 0) or 0),
-            4,
-        )
-        self._persist_wizard_state(wizard_state)
+        if update_wizard_state:
+            wizard_state["permissions"] = {"codes": permission_ids_by_code}
+            wizard_state["last_completed_step"] = max(
+                int(wizard_state.get("last_completed_step", 0) or 0),
+                4,
+            )
+            self._persist_wizard_state(wizard_state)
         return self.get_permissions_summary()
 
-    def ensure_job_title_permission_assignments(self) -> dict[str, Any]:
+    def ensure_job_title_permission_assignments(
+        self,
+        *,
+        enforce_wizard_writable: bool = True,
+        update_wizard_state: bool = True,
+    ) -> dict[str, Any]:
         """Replace the initial permission mappings for the seeded job titles."""
 
-        self._ensure_wizard_writable()
+        if enforce_wizard_writable:
+            self._ensure_wizard_writable()
 
         permissions_by_code = self._get_required_permissions_by_code()
         job_titles_by_code = self._get_required_job_titles_by_code()
@@ -756,14 +769,30 @@ class SetupService:
             )
             assignment_snapshot[job_title_code] = list(permission_codes)
 
-        wizard_state = self.get_wizard_state()
-        wizard_state["job_title_permissions"] = assignment_snapshot
-        wizard_state["last_completed_step"] = max(
-            int(wizard_state.get("last_completed_step", 0) or 0),
-            5,
-        )
-        self._persist_wizard_state(wizard_state)
+        if update_wizard_state:
+            wizard_state = self.get_wizard_state()
+            wizard_state["job_title_permissions"] = assignment_snapshot
+            wizard_state["last_completed_step"] = max(
+                int(wizard_state.get("last_completed_step", 0) or 0),
+                5,
+            )
+            self._persist_wizard_state(wizard_state)
         return self.get_job_title_permission_summary()
+
+    def ensure_canonical_job_titles(self) -> dict[str, Any]:
+        """Create or refresh canonical setup job titles without wizard-state writes."""
+
+        for definition in self.DEFAULT_JOB_TITLES:
+            self._upsert_job_title(
+                existing_job_title_id=None,
+                payload=JobTitleCreateRequest(
+                    name=definition["name"],
+                    code=definition["code"],
+                    description=definition["description"],
+                    hierarchical_level=definition["hierarchical_level"],
+                ),
+            )
+        return self.get_job_titles_summary()
 
     def save_operational_users_step(
         self,

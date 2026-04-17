@@ -18,7 +18,8 @@ from app.apps.permissions.service import (
     PermissionsValidationError,
 )
 from app.apps.users.models import User
-from app.database import get_db
+from app.core.config import get_settings
+from app.core.dependencies import get_db_session
 
 router = APIRouter(prefix="/permissions", tags=["Permissions"])
 
@@ -174,15 +175,24 @@ def get_job_title_permissions(
     summary="Ensure canonical permissions exist (admin, works anytime)",
 )
 def ensure_canonical_permissions(
-    db: DBSession = Depends(get_db),
+    db: DBSession = Depends(get_db_session),
     _current_user: User = Depends(require_permission("permissions.create")),
 ) -> dict:
     """Create any missing canonical permissions from the source of truth."""
     from app.apps.setup.service import SetupService
 
-    service = SetupService(db=db)
-    result = service.ensure_permission_catalog()
-    return {"message": f"Ensured {len(result.get('permissions', []))} permissions"}
+    service = SetupService(db=db, settings=get_settings())
+    job_titles_summary = service.ensure_canonical_job_titles()
+    permissions_summary = service.ensure_permission_catalog(
+        enforce_wizard_writable=False,
+        update_wizard_state=False,
+    )
+    return {
+        "message": "Ensured canonical job titles and permissions",
+        "job_titles": len(job_titles_summary.get("job_titles", [])),
+        "permissions": len(permissions_summary.get("permissions", [])),
+        "expected_permissions": permissions_summary.get("expected_count", 0),
+    }
 
 
 @router.post(
@@ -192,36 +202,27 @@ def ensure_canonical_permissions(
     summary="Ensure canonical job-title assignments (admin, works anytime)",
 )
 def ensure_canonical_job_title_permissions(
-    db: DBSession = Depends(get_db),
+    db: DBSession = Depends(get_db_session),
     _current_user: User = Depends(require_permission("permissions.assign")),
 ) -> dict:
     """Apply canonical job-title permission assignments (overwrites existing)."""
     from app.apps.setup.service import SetupService
-    from app.apps.permissions.schemas import JobTitlePermissionAssignmentRequest
 
-    setup_service = SetupService(db=db)
-    permissions_service = PermissionsService(db=db)
-
-    for (
-        job_title_code,
-        permission_codes,
-    ) in setup_service.DEFAULT_JOB_TITLE_PERMISSION_CODES.items():
-        job_title = setup_service._get_job_title_by_code(job_title_code)
-        if job_title is None:
-            continue
-
-        permission_ids = []
-        for perm_code in permission_codes:
-            perm = setup_service._get_permission_by_code(perm_code)
-            if perm:
-                permission_ids.append(perm.id)
-
-        if permission_ids:
-            permissions_service.assign_permissions_to_job_title(
-                job_title.id,
-                JobTitlePermissionAssignmentRequest(permission_ids=permission_ids),
-            )
-
+    service = SetupService(db=db, settings=get_settings())
+    service.ensure_canonical_job_titles()
+    service.ensure_permission_catalog(
+        enforce_wizard_writable=False,
+        update_wizard_state=False,
+    )
+    assignment_summary = service.ensure_job_title_permission_assignments(
+        enforce_wizard_writable=False,
+        update_wizard_state=False,
+    )
+    assignment_counts = {
+        code: len(items)
+        for code, items in assignment_summary.get("assignments", {}).items()
+    }
     return {
-        "message": f"Applied canonical assignments for {len(setup_service.DEFAULT_JOB_TITLE_PERMISSION_CODES)} job titles"
+        "message": "Applied canonical assignments for all required setup job titles",
+        "assignment_counts": assignment_counts,
     }
