@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session as DBSession
 
 from app.apps.permissions.dependencies import get_permissions_service, require_permission
 from app.apps.permissions.schemas import (
@@ -17,6 +18,7 @@ from app.apps.permissions.service import (
     PermissionsValidationError,
 )
 from app.apps.users.models import User
+from app.database import get_db
 
 router = APIRouter(prefix="/permissions", tags=["Permissions"])
 
@@ -163,3 +165,63 @@ def get_job_title_permissions(
         return service.get_job_title_permission_assignment(job_title_id)
     except PermissionsNotFoundError as exc:
         raise_permissions_http_error(exc)
+
+
+@router.post(
+    "/admin/ensure-canonical",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Ensure canonical permissions exist (admin, works anytime)",
+)
+def ensure_canonical_permissions(
+    db: DBSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("permissions.create")),
+) -> dict:
+    """Create any missing canonical permissions from the source of truth."""
+    from app.apps.setup.service import SetupService
+
+    service = SetupService(db=db)
+    result = service.ensure_permission_catalog()
+    return {"message": f"Ensured {len(result.get('permissions', []))} permissions"}
+
+
+@router.post(
+    "/admin/ensure-job-title-permissions",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Ensure canonical job-title assignments (admin, works anytime)",
+)
+def ensure_canonical_job_title_permissions(
+    db: DBSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("permissions.assign")),
+) -> dict:
+    """Apply canonical job-title permission assignments (overwrites existing)."""
+    from app.apps.setup.service import SetupService
+    from app.apps.permissions.schemas import JobTitlePermissionAssignmentRequest
+
+    setup_service = SetupService(db=db)
+    permissions_service = PermissionsService(db=db)
+
+    for (
+        job_title_code,
+        permission_codes,
+    ) in setup_service.DEFAULT_JOB_TITLE_PERMISSION_CODES.items():
+        job_title = setup_service._get_job_title_by_code(job_title_code)
+        if job_title is None:
+            continue
+
+        permission_ids = []
+        for perm_code in permission_codes:
+            perm = setup_service._get_permission_by_code(perm_code)
+            if perm:
+                permission_ids.append(perm.id)
+
+        if permission_ids:
+            permissions_service.assign_permissions_to_job_title(
+                job_title.id,
+                JobTitlePermissionAssignmentRequest(permission_ids=permission_ids),
+            )
+
+    return {
+        "message": f"Applied canonical assignments for {len(setup_service.DEFAULT_JOB_TITLE_PERMISSION_CODES)} job titles"
+    }
