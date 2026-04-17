@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.apps import api_router
-from app.apps.admin_panel import admin_router
 from app.apps.scanner_app.origins import get_merged_browser_origins
 from app.core.config import settings
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
 from app.shared.uploads import UPLOADS_DIR, ensure_uploads_dir_exists
-
-APP_DIR = Path(__file__).resolve().parent
-STATIC_DIR = APP_DIR / "static"
 
 app = FastAPI(
     title=settings.project_name,
@@ -74,7 +68,7 @@ def health_check() -> HealthResponse:
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
-    """Serve a minimal inline favicon to avoid 404s on admin UI."""
+    """Serve a minimal inline favicon to avoid browser 404 noise."""
 
     svg = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' ry='12' fill='#0ea5e9'/><text x='32' y='42' text-anchor='middle' font-size='32' fill='white' font-family='Arial, sans-serif'>HR</text></svg>"""
     return Response(content=svg, media_type="image/svg+xml")
@@ -85,10 +79,4 @@ app.mount(
     StaticFiles(directory=str(UPLOADS_DIR), check_dir=False),
     name="uploads",
 )
-app.mount(
-    "/static",
-    StaticFiles(directory=str(STATIC_DIR)),
-    name="static",
-)
-app.include_router(admin_router)
 app.include_router(api_router, prefix=settings.api_v1_prefix)
