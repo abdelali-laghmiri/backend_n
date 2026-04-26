@@ -52,3 +52,10 @@ app/static/uploads/employees/*
 alembic/versions/*.pyc
 
 .vercel
+
+# Docs artifacts
+docs/frontend/frontend-assets/
+docs/frontend/node_modules/
+docs/frontend/.next/
+docs/frontend/build/
+docs/frontend/dist/
