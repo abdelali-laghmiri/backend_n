@@ -427,3 +427,147 @@ def finalize_setup_installation(
         detail="Installation finalized successfully.",
         state=_build_wizard_state(service),
     )
+
+
+@router.post(
+    "/migrate-permissions",
+    status_code=status.HTTP_200_OK,
+    summary="Migrate permissions to canonical codes",
+)
+def migrate_to_canonical_permissions(
+    service: SetupService = Depends(get_setup_service),
+    current_user: User = Depends(get_current_super_admin),
+):
+    """Apply canonical permission migration."""
+    from app.core.database import SessionLocal
+    from sqlalchemy import text
+    
+    db = SessionLocal()
+    results = {"status": "pending", "inserted": 0, "updated": 0, "assigned": 0}
+    
+    try:
+        # 1. Insert canonical permissions
+        canonical_perms = [
+            ("organization.view", "View organization", "View departments, teams, and job titles.", "organization"),
+            ("organization.hierarchy.view", "View organization hierarchy", "View hierarchy for current user.", "organization"),
+            ("organization.hierarchy.view_all", "View full company hierarchy", "View full company organigram.", "organization"),
+            ("employees.view", "View employees", "View employee profiles.", "employees"),
+            ("permissions.view", "View permissions", "View permission catalog.", "permissions"),
+            ("announcements.view", "View announcements", "View announcements.", "announcements"),
+            ("messages.view", "View messages", "View inbox and sent.", "messages"),
+            ("messages.recipients.view", "View recipients", "List users for messaging.", "messages"),
+            ("messages.templates.manage", "Manage message templates", "Manage templates.", "messages"),
+            ("requests.view", "View requests", "View requests.", "requests"),
+            ("requests.approvals.view", "View my approval history", "View personal approvals.", "requests"),
+            ("requests.view_all", "View all requests", "View all requests.", "requests"),
+            ("attendance.view", "View attendance", "View attendance records.", "attendance"),
+            ("performance.view", "View performance", "View performance records.", "performance"),
+            ("dashboard.view", "View dashboard", "Access dashboard.", "dashboard"),
+            ("dashboard.analytics.view", "View dashboard analytics", "View analytics widgets.", "dashboard"),
+        ]
+        
+        for code, name, desc, module in canonical_perms:
+            try:
+                result = db.execute(text("""
+                    INSERT INTO permissions (code, name, description, module, is_active, created_at, updated_at)
+                    VALUES (:code, :name, :desc, :module, true, NOW(), NOW())
+                    ON CONFLICT (code) DO NOTHING
+                """), {"code": code, "name": name, "desc": desc, "module": module})
+                results["inserted"] += result.rowcount
+            except Exception:
+                pass
+        
+        # 2. Update legacy to canonical
+        updates = [
+            ("organization.read", "organization.view"),
+            ("organization.read_hierarchy", "organization.hierarchy.view"),
+            ("organization.company_hierarchy", "organization.hierarchy.view_all"),
+            ("employees.read", "employees.view"),
+            ("permissions.read", "permissions.view"),
+            ("announcements.read", "announcements.view"),
+            ("messages.read", "messages.view"),
+            ("messages.read_users", "messages.recipients.view"),
+            ("messages.templates", "messages.templates.manage"),
+            ("requests.read", "requests.view"),
+            ("requests.read_all", "requests.view_all"),
+            ("requests.read_my_approvals", "requests.approvals.view"),
+            ("attendance.read", "attendance.view"),
+            ("performance.read", "performance.view"),
+            ("dashboard.read", "dashboard.view"),
+            ("dashboard.analytics.read", "dashboard.analytics.view"),
+        ]
+        
+        for old_code, new_code in updates:
+            try:
+                result = db.execute(text("""
+                    UPDATE permissions SET code = :new, updated_at = NOW() WHERE code = :old
+                """), {"old": old_code, "new": new_code})
+                results["updated"] += result.rowcount
+            except Exception:
+                pass
+        
+        db.commit()
+        
+        # 3. Clear and reassign job title permissions
+        db.execute(text("DELETE FROM job_title_permissions"))
+        db.commit()
+        
+        job_title_perms = {
+            "RH_MANAGER": [
+                "organization.view", "organization.hierarchy.view", "organization.create", "organization.update",
+                "employees.view", "employees.create", "employees.update", "permissions.view", "permissions.assign",
+                "announcements.view", "announcements.create", "announcements.update", "announcements.delete",
+                "messages.view", "messages.recipients.view", "messages.send_all", "messages.reply", "messages.templates.manage",
+                "requests.view", "requests.create", "requests.approve", "requests.approvals.view", "requests.manage", "requests.view_all",
+                "attendance.view", "attendance.ingest", "attendance.nfc.ingest", "attendance.nfc.assign_card", "attendance.reports.generate",
+                "performance.view", "performance.manage", "dashboard.view",
+            ],
+            "DEPARTMENT_MANAGER": [
+                "organization.view", "organization.hierarchy.view", "employees.view",
+                "announcements.view", "announcements.create", "announcements.update", "announcements.delete",
+                "messages.view", "messages.recipients.view", "messages.send_same_or_down", "messages.reply",
+                "requests.view", "requests.approve", "requests.approvals.view",
+                "attendance.view", "performance.view", "dashboard.view",
+            ],
+            "TEAM_LEADER": [
+                "organization.hierarchy.view", "announcements.view",
+                "messages.view", "messages.recipients.view", "messages.send_same_or_down", "messages.reply",
+                "requests.view", "requests.create", "requests.approve", "requests.approvals.view",
+                "attendance.view", "performance.create", "performance.view", "dashboard.view",
+            ],
+            "EMPLOYEE": [
+                "announcements.view", "messages.view", "messages.recipients.view", "messages.send_same_or_down", "messages.reply",
+                "requests.create", "requests.view",
+            ],
+        }
+        
+        for jt_code, perm_codes in job_title_perms.items():
+            jt = db.execute(text("SELECT id FROM job_titles WHERE code = :code"), {"code": jt_code}).fetchone()
+            if jt:
+                for p_code in perm_codes:
+                    p = db.execute(text("SELECT id FROM permissions WHERE code = :code"), {"code": p_code}).fetchone()
+                    if p:
+                        try:
+                            db.execute(text("""
+                                INSERT INTO job_title_permissions (job_title_id, permission_id, created_at)
+                                VALUES (:jt_id, :p_id, NOW())
+                            """), {"jt_id": jt[0], "p_id": p[0]})
+                            results["assigned"] += 1
+                        except Exception:
+                            pass
+        
+        db.commit()
+        
+        # 4. Get final count
+        count = db.execute(text("SELECT COUNT(*) FROM permissions WHERE is_active = true")).fetchone()
+        results["total_permissions"] = count[0] if count else 0
+        results["status"] = "complete"
+        
+    except Exception as e:
+        db.rollback()
+        results["status"] = "error"
+        results["error"] = str(e)
+    finally:
+        db.close()
+    
+    return results

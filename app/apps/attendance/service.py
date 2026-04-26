@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.apps.attendance.models import (
     AttendanceDailySummary,
+    AttendanceEventTypeEnum,
     AttendanceMonthlyReport,
     AttendanceRawScanEvent,
     AttendanceReaderTypeEnum,
@@ -70,7 +71,7 @@ class AttendanceService:
         employee = self._get_active_employee_by_nfc_uid(payload.nfc_uid)
         return self._ingest_scan_for_employee(
             employee=employee,
-            reader_type=payload.reader_type,
+            reader_type=self._map_attendance_type_to_reader_type(payload.attendance_type),
             scanned_at=payload.scanned_at,
             source=payload.source,
         )
@@ -662,14 +663,10 @@ class AttendanceService:
     ) -> AttendanceStatusEnum:
         """Derive the practical attendance status from summary scan fields."""
 
-        if daily_summary.first_check_in_at is not None or daily_summary.last_check_out_at is not None:
-            if (
-                daily_summary.first_check_in_at is not None
-                and daily_summary.last_check_out_at is not None
-                and daily_summary.worked_duration_minutes is not None
-            ):
-                return AttendanceStatusEnum.PRESENT
+        if daily_summary.first_check_in_at is not None:
+            return AttendanceStatusEnum.PRESENT
 
+        if daily_summary.last_check_out_at is not None:
             return AttendanceStatusEnum.INCOMPLETE
 
         if daily_summary.status == AttendanceStatusEnum.LEAVE.value:
@@ -785,6 +782,20 @@ class AttendanceService:
         """Build a readable employee full name."""
 
         return f"{employee.first_name} {employee.last_name}"
+
+    def _map_attendance_type_to_reader_type(
+        self,
+        attendance_type: AttendanceEventTypeEnum,
+    ) -> AttendanceReaderTypeEnum:
+        """Convert explicit attendance intent to the legacy stored reader direction."""
+
+        if attendance_type == AttendanceEventTypeEnum.CHECK_IN:
+            return AttendanceReaderTypeEnum.IN
+
+        if attendance_type == AttendanceEventTypeEnum.CHECK_OUT:
+            return AttendanceReaderTypeEnum.OUT
+
+        raise AttendanceValidationError("Unsupported attendance type.")
 
     def _normalize_nfc_uid(self, nfc_uid: str) -> str:
         """Normalize NFC card identifiers for service-layer comparisons."""

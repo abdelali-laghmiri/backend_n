@@ -286,6 +286,13 @@ class RequestsService:
 
         self.get_request_type(request_type_id)
         self._ensure_unique_workflow_step_order(request_type_id, payload.step_order)
+        self._validate_step_configuration(
+            step_kind=payload.step_kind,
+            resolver_type=payload.resolver_type,
+            resolver_job_title_id=payload.resolver_job_title_id,
+        )
+        if payload.resolver_job_title_id is not None:
+            self._validate_approver_job_title(payload.resolver_job_title_id)
 
         request_step = RequestWorkflowStep(
             request_type_id=request_type_id,
@@ -293,6 +300,7 @@ class RequestsService:
             name=payload.name,
             step_kind=payload.step_kind.value,
             resolver_type=payload.resolver_type.value if payload.resolver_type else None,
+            resolver_job_title_id=payload.resolver_job_title_id,
             is_required=payload.is_required,
             is_active=True,
         )
@@ -353,10 +361,18 @@ class RequestsService:
                 else None
             )
         )
+        final_resolver_job_title_id = (
+            changes["resolver_job_title_id"]
+            if "resolver_job_title_id" in changes
+            else step.resolver_job_title_id
+        )
         self._validate_step_configuration(
             step_kind=final_step_kind,
             resolver_type=final_resolver_type,
+            resolver_job_title_id=final_resolver_job_title_id,
         )
+        if final_resolver_job_title_id is not None:
+            self._validate_approver_job_title(final_resolver_job_title_id)
 
         if final_step_order != step.step_order:
             self._ensure_unique_workflow_step_order(
@@ -910,6 +926,7 @@ class RequestsService:
                 if current_step.resolver_type is not None
                 else None
             ),
+            resolver_job_title_id=current_step.resolver_job_title_id,
             is_required=current_step.is_required,
             current_approver_user_id=(
                 current_approver.id if current_approver is not None else None
@@ -947,6 +964,7 @@ class RequestsService:
                 if action.resolver_type is not None
                 else None
             ),
+            resolver_job_title_id=None,
             actor_user_id=action.actor_user_id,
             actor_matricule=actor.matricule if actor is not None else None,
             actor_name=actor_name,
@@ -1003,12 +1021,13 @@ class RequestsService:
                     step_order=step.step_order,
                     name=step.name,
                     step_kind=RequestStepKindEnum(step.step_kind),
-                    resolver_type=(
-                        RequestResolverTypeEnum(step.resolver_type)
-                        if step.resolver_type is not None
-                        else None
-                    ),
-                    is_required=step.is_required,
+                resolver_type=(
+                    RequestResolverTypeEnum(step.resolver_type)
+                    if step.resolver_type is not None
+                    else None
+                ),
+                resolver_job_title_id=step.resolver_job_title_id,
+                is_required=step.is_required,
                     state=state,
                     actor_user_id=actor.id if actor is not None else None,
                     actor_matricule=actor.matricule if actor is not None else None,
@@ -1380,6 +1399,12 @@ class RequestsService:
         if step.step_kind != RequestStepKindEnum.APPROVER.value:
             return None
 
+        if step.resolver_job_title_id is not None:
+            return self._resolve_job_title_approver(
+                requester_employee=requester_employee,
+                resolver_job_title_id=step.resolver_job_title_id,
+            )
+
         if step.resolver_type == RequestResolverTypeEnum.TEAM_LEADER.value:
             return self._resolve_team_leader(requester_employee)
 
@@ -1392,6 +1417,52 @@ class RequestsService:
         raise RequestsValidationError(
             f"Unsupported resolver type '{step.resolver_type}'."
         )
+
+    def _resolve_job_title_approver(
+        self,
+        *,
+        requester_employee: Employee,
+        resolver_job_title_id: int,
+    ) -> User | None:
+        """Resolve an active approver user by selected approver job title."""
+
+        self._validate_approver_job_title(resolver_job_title_id)
+
+        statement = (
+            select(User)
+            .join(Employee, Employee.user_id == User.id)
+            .join(JobTitle, JobTitle.id == Employee.job_title_id)
+            .where(
+                User.is_active.is_(True),
+                Employee.is_active.is_(True),
+                JobTitle.is_active.is_(True),
+                JobTitle.id == resolver_job_title_id,
+            )
+        )
+
+        if requester_employee.team_id is not None:
+            team_candidate = self.db.execute(
+                statement
+                .where(Employee.team_id == requester_employee.team_id)
+                .order_by(Employee.id.asc(), User.id.asc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if team_candidate is not None:
+                return team_candidate
+
+        if requester_employee.department_id is not None:
+            department_candidate = self.db.execute(
+                statement
+                .where(Employee.department_id == requester_employee.department_id)
+                .order_by(Employee.id.asc(), User.id.asc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if department_candidate is not None:
+                return department_candidate
+
+        return self.db.execute(
+            statement.order_by(Employee.id.asc(), User.id.asc()).limit(1)
+        ).scalar_one_or_none()
 
     def _resolve_team_leader(self, requester_employee: Employee) -> User | None:
         """Resolve the team leader of the requester's current team."""
@@ -1861,14 +1932,46 @@ class RequestsService:
         *,
         step_kind: RequestStepKindEnum,
         resolver_type: RequestResolverTypeEnum | None,
+        resolver_job_title_id: int | None,
     ) -> None:
         """Validate the step-kind and resolver configuration."""
 
-        if step_kind == RequestStepKindEnum.APPROVER and resolver_type is None:
-            raise RequestsValidationError("Approver steps must define a resolver type.")
+        has_resolver_type = resolver_type is not None
+        has_resolver_job_title = resolver_job_title_id is not None
 
-        if step_kind == RequestStepKindEnum.CONCEPTION and resolver_type is not None:
-            raise RequestsValidationError("Conception steps cannot define a resolver type.")
+        if step_kind == RequestStepKindEnum.APPROVER and not (
+            has_resolver_type or has_resolver_job_title
+        ):
+            raise RequestsValidationError(
+                "Approver steps must define a resolver type or an approver job title."
+            )
+
+        if step_kind == RequestStepKindEnum.APPROVER and has_resolver_type and has_resolver_job_title:
+            raise RequestsValidationError(
+                "Approver steps cannot define both resolver type and approver job title."
+            )
+
+        if step_kind == RequestStepKindEnum.CONCEPTION and (
+            has_resolver_type or has_resolver_job_title
+        ):
+            raise RequestsValidationError("Conception steps cannot define resolver configuration.")
+
+    def _validate_approver_job_title(self, resolver_job_title_id: int) -> JobTitle:
+        """Validate that approver job title exists and is hierarchical-level > 1."""
+
+        job_title = self.db.get(JobTitle, resolver_job_title_id)
+        if job_title is None:
+            raise RequestsValidationError("Approver job title not found.")
+
+        if not job_title.is_active:
+            raise RequestsValidationError("Approver job title must be active.")
+
+        if job_title.hierarchical_level <= 1:
+            raise RequestsValidationError(
+                "Approver job title must have hierarchical level greater than 1."
+            )
+
+        return job_title
 
     def _ensure_unique_request_type_code(
         self,

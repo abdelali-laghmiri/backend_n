@@ -17,6 +17,7 @@ from app.apps.attendance.dependencies import get_attendance_service
 from app.apps.attendance.router import router as attendance_router
 from app.apps.attendance.models import AttendanceStatusEnum, NfcCard
 from app.apps.attendance.schemas import (
+    AttendanceEventTypeEnum,
     AttendanceNfcCardAssignRequest,
     AttendanceNfcScanIngestRequest,
     AttendanceScanIngestRequest,
@@ -126,7 +127,7 @@ class AttendanceNfcTests(unittest.TestCase):
         self.assertEqual(daily_summary.employee_id, employee.id)
         self.assertEqual(daily_summary.first_check_in_at, scanned_at)
         self.assertIsNone(daily_summary.last_check_out_at)
-        self.assertEqual(daily_summary.status, AttendanceStatusEnum.INCOMPLETE.value)
+        self.assertEqual(daily_summary.status, AttendanceStatusEnum.PRESENT.value)
 
     def test_nfc_scan_flow_reuses_daily_summary_logic(self) -> None:
         employee = self._seed_employee(nfc_uid="NFC-0001")
@@ -134,7 +135,7 @@ class AttendanceNfcTests(unittest.TestCase):
         self.service.ingest_nfc_scan_event(
             AttendanceNfcScanIngestRequest(
                 nfc_uid="nfc-0001",
-                reader_type="IN",
+                attendance_type=AttendanceEventTypeEnum.CHECK_IN,
                 scanned_at=datetime(2026, 3, 29, 8, 0, tzinfo=timezone.utc),
                 source="nfc_terminal",
             )
@@ -142,7 +143,7 @@ class AttendanceNfcTests(unittest.TestCase):
         raw_event, daily_summary = self.service.ingest_nfc_scan_event(
             AttendanceNfcScanIngestRequest(
                 nfc_uid="nfc-0001",
-                reader_type="OUT",
+                attendance_type=AttendanceEventTypeEnum.CHECK_OUT,
                 scanned_at=datetime(2026, 3, 29, 17, 30, tzinfo=timezone.utc),
                 source="nfc_terminal",
             )
@@ -161,7 +162,7 @@ class AttendanceNfcTests(unittest.TestCase):
             self.service.ingest_nfc_scan_event(
                 AttendanceNfcScanIngestRequest(
                     nfc_uid="nfc-inactive",
-                    reader_type="IN",
+                    attendance_type=AttendanceEventTypeEnum.CHECK_IN,
                     scanned_at=datetime(2026, 3, 29, 8, 0, tzinfo=timezone.utc),
                     source="nfc_terminal",
                 )
@@ -174,7 +175,7 @@ class AttendanceNfcTests(unittest.TestCase):
             self.service.ingest_nfc_scan_event(
                 AttendanceNfcScanIngestRequest(
                     nfc_uid="missing-card",
-                    reader_type="IN",
+                    attendance_type=AttendanceEventTypeEnum.CHECK_IN,
                     scanned_at=datetime(2026, 3, 29, 8, 0, tzinfo=timezone.utc),
                     source="nfc_terminal",
                 )

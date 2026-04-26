@@ -37,6 +37,7 @@ def get_engine_options(database_url: str, *, echo: bool = False) -> dict[str, An
     if is_sqlite_database(database_url):
         engine_options["connect_args"] = {"check_same_thread": False}
     else:
+        engine_options["connect_args"] = {"prepare_threshold": None}
         engine_options["pool_pre_ping"] = True
 
     return engine_options

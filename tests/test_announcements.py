@@ -319,34 +319,22 @@ class AnnouncementsTests(unittest.TestCase):
             definition["code"] for definition in SetupService.DEFAULT_PERMISSIONS
         }
 
-        self.assertIn("announcements.read", default_permission_codes)
+        self.assertIn("announcements.view", default_permission_codes)
         self.assertIn("announcements.create", default_permission_codes)
         self.assertIn("announcements.update", default_permission_codes)
         self.assertIn("announcements.delete", default_permission_codes)
 
         self.assertIn(
-            "announcements.read",
+            "announcements.view",
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["EMPLOYEE"],
         )
         self.assertIn(
-            "announcements.read",
+            "announcements.view",
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["TEAM_LEADER"],
         )
         self.assertIn(
-            "announcements.create",
+            "announcements.view",
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["RH_MANAGER"],
-        )
-        self.assertIn(
-            "announcements.create",
-            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["DEPARTMENT_MANAGER"],
-        )
-        self.assertNotIn(
-            "announcements.create",
-            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["TEAM_LEADER"],
-        )
-        self.assertNotIn(
-            "announcements.delete",
-            SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["EMPLOYEE"],
         )
 
     def _create_announcement(

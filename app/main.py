@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.apps import api_router
 from app.apps.scanner_app.origins import get_merged_browser_origins
 from app.core.config import settings
+from app.core.database_init import initialize_database_schema
 from app.shared.constants import API_TAGS
 from app.shared.responses import HealthResponse
 from app.shared.uploads import UPLOADS_DIR, ensure_uploads_dir_exists
@@ -39,6 +40,13 @@ if browser_cors_allow_origins:
             "X-Requested-With",
         ],
     )
+
+
+@app.on_event("startup")
+def initialize_database_on_startup() -> None:
+    """Create missing tables on first boot without mutating existing tables."""
+
+    initialize_database_schema()
 
 
 @app.get(

@@ -5,7 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.apps.attendance.models import AttendanceReaderTypeEnum, AttendanceStatusEnum
+from app.apps.attendance.models import (
+    AttendanceEventTypeEnum,
+    AttendanceReaderTypeEnum,
+    AttendanceStatusEnum,
+)
 from app.shared.responses import ModuleStatusResponse
 
 
@@ -25,10 +29,9 @@ class AttendanceStatusResponse(ModuleStatusResponse):
     module: Literal["attendance"] = "attendance"
 
 
-class AttendanceScanBaseRequest(BaseModel):
-    """Shared payload fields used by attendance scan ingestion endpoints."""
+class AttendanceIngestMetadataRequest(BaseModel):
+    """Shared metadata used by attendance scan ingestion endpoints."""
 
-    reader_type: AttendanceReaderTypeEnum
     scanned_at: datetime
     source: str = Field(default="external_pointage_app", min_length=1, max_length=120)
 
@@ -47,9 +50,10 @@ class AttendanceScanBaseRequest(BaseModel):
         return value
 
 
-class AttendanceScanIngestRequest(AttendanceScanBaseRequest):
+class AttendanceScanIngestRequest(AttendanceIngestMetadataRequest):
     """Payload sent by the external pointage application using matricule identity."""
 
+    reader_type: AttendanceReaderTypeEnum
     matricule: str = Field(min_length=1, max_length=50)
 
     @field_validator("matricule")
@@ -58,10 +62,11 @@ class AttendanceScanIngestRequest(AttendanceScanBaseRequest):
         return normalize_required_string(value).upper()
 
 
-class AttendanceNfcScanIngestRequest(AttendanceScanBaseRequest):
+class AttendanceNfcScanIngestRequest(AttendanceIngestMetadataRequest):
     """Payload sent by the external pointage application using NFC identity."""
 
     nfc_uid: str = Field(min_length=1, max_length=120)
+    attendance_type: AttendanceEventTypeEnum
 
     @field_validator("nfc_uid")
     @classmethod

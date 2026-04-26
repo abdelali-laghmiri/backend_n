@@ -195,6 +195,7 @@ class RequestWorkflowStepBaseRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     step_kind: RequestStepKindEnum
     resolver_type: RequestResolverTypeEnum | None = None
+    resolver_job_title_id: int | None = Field(default=None, ge=1)
     is_required: bool = True
 
     @field_validator("name")
@@ -204,11 +205,27 @@ class RequestWorkflowStepBaseRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_step_configuration(self) -> "RequestWorkflowStepBaseRequest":
-        if self.step_kind == RequestStepKindEnum.APPROVER and self.resolver_type is None:
-            raise ValueError("Approver steps must define a resolver type.")
+        has_resolver_type = self.resolver_type is not None
+        has_resolver_job_title = self.resolver_job_title_id is not None
 
-        if self.step_kind == RequestStepKindEnum.CONCEPTION and self.resolver_type is not None:
-            raise ValueError("Conception steps cannot define a resolver type.")
+        if self.step_kind == RequestStepKindEnum.APPROVER and not (
+            has_resolver_type or has_resolver_job_title
+        ):
+            raise ValueError(
+                "Approver steps must define a resolver type or an approver job title."
+            )
+
+        if self.step_kind == RequestStepKindEnum.APPROVER and has_resolver_type and has_resolver_job_title:
+            raise ValueError(
+                "Approver steps cannot define both resolver type and approver job title."
+            )
+
+        if self.step_kind == RequestStepKindEnum.CONCEPTION and (
+            has_resolver_type or has_resolver_job_title
+        ):
+            raise ValueError(
+                "Conception steps cannot define resolver configuration."
+            )
 
         return self
 
@@ -224,6 +241,7 @@ class RequestWorkflowStepUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     step_kind: RequestStepKindEnum | None = None
     resolver_type: RequestResolverTypeEnum | None = None
+    resolver_job_title_id: int | None = Field(default=None, ge=1)
     is_required: bool | None = None
     is_active: bool | None = None
 
@@ -245,6 +263,7 @@ class RequestWorkflowStepResponse(BaseModel):
     name: str
     step_kind: RequestStepKindEnum
     resolver_type: RequestResolverTypeEnum | None
+    resolver_job_title_id: int | None
     is_required: bool
     is_active: bool
     created_at: datetime
@@ -268,6 +287,7 @@ class RequestCurrentStepResponse(BaseModel):
     name: str
     step_kind: RequestStepKindEnum
     resolver_type: RequestResolverTypeEnum | None
+    resolver_job_title_id: int | None
     is_required: bool
     current_approver_user_id: int | None
     current_approver_matricule: str | None
@@ -298,6 +318,7 @@ class RequestActionHistoryResponse(BaseModel):
     step_order: int | None
     step_kind: RequestStepKindEnum | None
     resolver_type: RequestResolverTypeEnum | None
+    resolver_job_title_id: int | None = None
     actor_user_id: int | None
     actor_matricule: str | None
     actor_name: str | None
@@ -328,6 +349,7 @@ class RequestApprovalHistoryResponse(BaseModel):
     step_order: int | None
     step_kind: RequestStepKindEnum | None
     resolver_type: RequestResolverTypeEnum | None
+    resolver_job_title_id: int | None = None
     comment: str | None
 
 
@@ -339,6 +361,7 @@ class RequestWorkflowProgressResponse(BaseModel):
     name: str
     step_kind: RequestStepKindEnum
     resolver_type: RequestResolverTypeEnum | None
+    resolver_job_title_id: int | None
     is_required: bool
     state: str
     actor_user_id: int | None

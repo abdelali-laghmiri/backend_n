@@ -22,6 +22,13 @@ class AttendanceReaderTypeEnum(str, Enum):
     OUT = "OUT"
 
 
+class AttendanceEventTypeEnum(str, Enum):
+    """Explicit attendance intent sent by scanner applications."""
+
+    CHECK_IN = "CHECK_IN"
+    CHECK_OUT = "CHECK_OUT"
+
+
 class AttendanceStatusEnum(str, Enum):
     """Supported day-level attendance statuses."""
 
@@ -181,6 +188,7 @@ class AttendanceMonthlyReport(Base):
 
 __all__ = [
     "AttendanceDailySummary",
+    "AttendanceEventTypeEnum",
     "AttendanceMonthlyReport",
     "AttendanceRawScanEvent",
     "AttendanceReaderTypeEnum",

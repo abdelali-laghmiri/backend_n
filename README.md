@@ -136,6 +136,44 @@ python -m alembic current
 
 The system now has a two-phase first-installation flow backed by the main application database.
 
+## Automatic Database Initialization
+
+The backend now verifies the schema on startup and creates any missing tables with SQLAlchemy `create_all()`.
+
+- Empty databases bootstrap safely.
+- Existing tables are left unchanged.
+- Alembic remains the upgrade path for structural schema changes.
+- Container startup still runs Alembic first when database connection settings are available.
+
+## Data Reset And Seeding Scripts
+
+Operational scripts are available under `scripts/`:
+
+1. Safe reset plan for application data only:
+
+```powershell
+python scripts/reset_application_data.py
+```
+
+This is a dry-run by default and prints the exact reset plan without executing it.
+
+2. Full reusable company dataset seed:
+
+```powershell
+python scripts/seed_full_company_dataset.py
+```
+
+This seed script is idempotent and rebuilds:
+
+- canonical job titles
+- canonical permissions
+- job-title permission assignments
+- departments and teams
+- users and employees
+- NFC cards
+- attendance data
+- request types and sample workflow requests
+
 Phase 1 bootstrap:
 
 - `POST /api/v1/setup/initialize` creates the first technical super admin from `.env`.
@@ -777,6 +815,8 @@ Invoke-RestMethod `
 The attendance module receives external pointage scans, stores lightweight raw traceability events, maintains one daily summary per employee and date, and generates monthly reports from those daily summaries.
 
 - The external pointage application sends scans to the backend through `POST /api/v1/attendance/scans`.
+- NFC-enabled devices can use `POST /api/v1/attendance/nfc-scans` with `attendance_type` set to `CHECK_IN` or `CHECK_OUT`.
+- NFC cards are assigned to employees through `POST /api/v1/attendance/nfc-cards/assign`.
 - The first version supports two reader types: `IN` and `OUT`.
 - Employees are resolved explicitly by `matricule`.
 - The attendance date follows the source-local date carried by `scanned_at`, while stored timestamps are normalized to UTC.
@@ -784,6 +824,8 @@ The attendance module receives external pointage scans, stores lightweight raw t
 - Daily summaries are the main attendance source for ongoing usage.
 - Monthly reports are generated from daily summaries and are stored for reporting convenience.
 - `attendance.ingest` protects scan ingestion.
+- `attendance.nfc.ingest` protects NFC scan ingestion (falls back to `attendance.ingest` if not granted).
+- `attendance.nfc.assign_card` protects NFC card assignment.
 - `attendance.read` protects attendance read endpoints.
 - `attendance.reports.generate` protects monthly report generation.
 - For one employee and one date, the earliest `IN` becomes `first_check_in_at`.
@@ -830,6 +872,63 @@ $body = @{
 Invoke-RestMethod `
     -Method Post `
     -Uri "http://localhost:8000/api/v1/attendance/scans" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+The NFC scan endpoints use an NFC card UID instead of matricule:
+
+Send an NFC `CHECK_IN` scan event:
+
+```powershell
+$token = "paste-ingestion-access-token-here"
+$body = @{
+    nfc_uid = "A1B2C3D4E5F6"
+    attendance_type = "CHECK_IN"
+    scanned_at = "2026-03-24T08:02:00Z"
+    source = "nfc-reader-in"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/nfc-scans" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Send an NFC `CHECK_OUT` scan event:
+
+```powershell
+$token = "paste-ingestion-access-token-here"
+$body = @{
+    nfc_uid = "A1B2C3D4E5F6"
+    attendance_type = "CHECK_OUT"
+    scanned_at = "2026-03-24T17:31:00Z"
+    source = "nfc-reader-out"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/nfc-scans" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Assign an NFC card to an employee (enables NFC-based attendance):
+
+```powershell
+$token = "paste-admin-access-token-here"
+$body = @{
+    employee_id = 1
+    nfc_uid = "A1B2C3D4E5F6"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/attendance/nfc-cards/assign" `
     -Headers @{ Authorization = "Bearer $token" } `
     -ContentType "application/json" `
     -Body $body

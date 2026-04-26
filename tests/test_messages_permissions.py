@@ -308,12 +308,12 @@ class MessagesSetupDefaultsTests(unittest.TestCase):
             definition["code"] for definition in SetupService.DEFAULT_PERMISSIONS
         }
 
-        self.assertIn("messages.read", default_permission_codes)
-        self.assertIn("messages.read_users", default_permission_codes)
+        self.assertIn("messages.view", default_permission_codes)
+        self.assertIn("messages.recipients.view", default_permission_codes)
         self.assertIn("messages.send_all", default_permission_codes)
         self.assertIn("messages.send_same_or_down", default_permission_codes)
         self.assertIn("messages.reply", default_permission_codes)
-        self.assertIn("messages.templates", default_permission_codes)
+        self.assertIn("messages.templates.manage", default_permission_codes)
         self.assertIn("messages.send", default_permission_codes)
 
         self.assertIn(
@@ -321,7 +321,7 @@ class MessagesSetupDefaultsTests(unittest.TestCase):
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["RH_MANAGER"],
         )
         self.assertIn(
-            "messages.templates",
+            "messages.templates.manage",
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["RH_MANAGER"],
         )
         self.assertIn(

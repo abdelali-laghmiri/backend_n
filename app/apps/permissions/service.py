@@ -4,6 +4,7 @@ from sqlalchemy import Select, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.apps.permissions.catalog import LEGACY_PERMISSION_ALIASES
 from app.apps.employees.models import Employee
 from app.apps.organization.models import JobTitle
 from app.apps.permissions.models import JobTitlePermissionAssignment, Permission
@@ -177,7 +178,13 @@ class PermissionsService:
         """Resolve the effective permissions for the authenticated user."""
 
         if user.is_super_admin:
-            return EffectivePermissionResponse(has_full_access=True, permissions=[])
+            statement = select(Permission.code).where(Permission.is_active.is_(True)).order_by(
+                Permission.code.asc()
+            )
+            return EffectivePermissionResponse(
+                has_full_access=True,
+                permissions=list(self.db.execute(statement).scalars().all()),
+            )
 
         employee = self.db.execute(
             select(Employee)
@@ -205,6 +212,23 @@ class PermissionsService:
             permissions=permission_codes,
         )
 
+    def _build_alias_mapping(self) -> dict[str, str]:
+        """Build a mapping from alias codes to canonical codes."""
+        statement = select(Permission).where(Permission.is_active.is_(True))
+        permissions = list(self.db.execute(statement).scalars().all())
+
+        alias_mapping: dict[str, str] = {}
+        for perm in permissions:
+            alias_mapping[perm.code] = perm.code
+
+        alias_mapping.update(LEGACY_PERMISSION_ALIASES)
+        return alias_mapping
+
+    def _resolve_to_canonical(self, permission_code: str) -> str:
+        """Resolve a permission code (including aliases) to its canonical form."""
+        alias_map = self._build_alias_mapping()
+        return alias_map.get(permission_code, permission_code)
+
     def user_has_permission(self, user: User, permission_code: str) -> bool:
         """Return whether the user effectively has the requested permission."""
 
@@ -212,7 +236,13 @@ class PermissionsService:
         if effective_permissions.has_full_access:
             return True
 
-        return permission_code in effective_permissions.permissions
+        canonical_code = self._resolve_to_canonical(permission_code)
+
+        for perm in effective_permissions.permissions:
+            if self._resolve_to_canonical(perm) == canonical_code:
+                return True
+
+        return False
 
     def _ensure_unique_code(
         self,

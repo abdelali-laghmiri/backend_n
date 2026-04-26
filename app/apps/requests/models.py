@@ -154,6 +154,11 @@ class RequestWorkflowStep(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     step_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     resolver_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resolver_job_title_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job_titles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     is_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

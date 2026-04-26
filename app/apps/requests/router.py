@@ -78,7 +78,9 @@ def create_request_type(
 def list_request_types(
     include_inactive: bool = Query(default=False),
     service: RequestsService = Depends(get_requests_service),
-    _current_user: User = Depends(require_permission("requests.manage")),
+    _current_user: User = Depends(
+        require_any_permission("requests.create", "requests.manage")
+    ),
 ) -> list[RequestTypeResponse]:
     request_types = service.list_request_types(include_inactive=include_inactive)
     return [RequestTypeResponse.model_validate(item) for item in request_types]
@@ -153,7 +155,9 @@ def list_request_fields(
     request_type_id: int,
     include_inactive: bool = Query(default=False),
     service: RequestsService = Depends(get_requests_service),
-    _current_user: User = Depends(require_permission("requests.manage")),
+    _current_user: User = Depends(
+        require_any_permission("requests.create", "requests.manage")
+    ),
 ) -> list[RequestTypeFieldResponse]:
     try:
         request_fields = service.list_request_fields(

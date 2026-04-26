@@ -7,17 +7,13 @@ run_migrations() {
     return
   fi
 
-  if [ -z "${DATABASE_URL:-}" ]; then
-    echo "DATABASE_URL is not set; skipping migrations and starting the app."
-    return
-  fi
-
   echo "Running database migrations..."
   python - <<'PY'
 from __future__ import annotations
 
 import os
 import time
+from urllib.parse import quote_plus
 
 from alembic import command
 from alembic.config import Config
@@ -32,7 +28,33 @@ def normalize_database_url(database_url: str) -> str:
     return database_url
 
 
-database_url = normalize_database_url(os.environ["DATABASE_URL"])
+def resolve_database_url() -> str | None:
+    raw_database_url = os.getenv("DATABASE_URL", "").strip()
+    if raw_database_url:
+        return normalize_database_url(raw_database_url)
+
+    postgres_host = os.getenv("POSTGRES_HOST", "").strip()
+    postgres_db = os.getenv("POSTGRES_DB", "").strip()
+    postgres_user = os.getenv("POSTGRES_USER", "").strip()
+    postgres_password = os.getenv("POSTGRES_PASSWORD", "")
+    postgres_port = os.getenv("POSTGRES_PORT", "5432").strip() or "5432"
+
+    if not postgres_host or not postgres_db or not postgres_user:
+        return None
+
+    username = quote_plus(postgres_user)
+    password = quote_plus(postgres_password)
+    return (
+        f"postgresql+psycopg://{username}:{password}"
+        f"@{postgres_host}:{postgres_port}/{postgres_db}"
+    )
+
+
+database_url = resolve_database_url()
+if not database_url:
+    print("[migrations] No database connection settings found; skipping migrations.")
+    raise SystemExit(0)
+
 retries = int(os.getenv("MIGRATION_RETRIES", "10"))
 retry_delay_seconds = float(os.getenv("MIGRATION_RETRY_DELAY_SECONDS", "3"))
 lock_id = int(os.getenv("ALEMBIC_LOCK_ID", "821457901"))
