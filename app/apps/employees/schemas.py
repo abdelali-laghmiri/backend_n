@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def normalize_required_string(value: str) -> str:
@@ -45,6 +46,8 @@ class EmployeeCreateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     image: str | None = Field(default=None, max_length=500)
     hire_date: date
+    contract_type: Literal["INTERNAL", "EXTERNAL"] = Field(default="INTERNAL")
+    external_company_name: str | None = Field(default=None, max_length=255)
     available_leave_balance_days: int = Field(default=0, ge=0)
     department_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
@@ -65,10 +68,22 @@ class EmployeeCreateRequest(BaseModel):
     def validate_email(cls, value: str) -> str:
         return normalize_email(value)
 
-    @field_validator("phone", "image")
+    @field_validator("phone", "image", "external_company_name")
     @classmethod
     def validate_optional_text_fields(cls, value: str | None) -> str | None:
         return normalize_optional_string(value)
+
+    @model_validator(mode="after")
+    def validate_external_company_for_external_contract(self) -> "EmployeeCreateRequest":
+        if self.contract_type == "EXTERNAL":
+            if not self.external_company_name or not self.external_company_name.strip():
+                raise ValueError(
+                    "External company name is required when contract type is EXTERNAL."
+                )
+            self.external_company_name = self.external_company_name.strip()
+        else:
+            self.external_company_name = None
+        return self
 
 
 class EmployeeUpdateRequest(BaseModel):
@@ -81,6 +96,8 @@ class EmployeeUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     image: str | None = Field(default=None, max_length=500)
     hire_date: date | None = None
+    contract_type: Literal["INTERNAL", "EXTERNAL"] | None = None
+    external_company_name: str | None = Field(default=None, max_length=255)
     available_leave_balance_days: int | None = Field(default=None, ge=0)
     department_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
@@ -111,10 +128,22 @@ class EmployeeUpdateRequest(BaseModel):
 
         return normalize_email(value)
 
-    @field_validator("phone", "image")
+    @field_validator("phone", "image", "external_company_name")
     @classmethod
     def validate_optional_text_fields(cls, value: str | None) -> str | None:
         return normalize_optional_string(value)
+
+    @model_validator(mode="after")
+    def validate_external_company_for_external_contract(self) -> "EmployeeUpdateRequest":
+        if self.contract_type == "EXTERNAL":
+            if not self.external_company_name or not self.external_company_name.strip():
+                raise ValueError(
+                    "External company name is required when contract type is EXTERNAL."
+                )
+            self.external_company_name = self.external_company_name.strip()
+        elif self.contract_type == "INTERNAL":
+            self.external_company_name = None
+        return self
 
 
 class EmployeeResponse(BaseModel):
@@ -129,6 +158,8 @@ class EmployeeResponse(BaseModel):
     phone: str | None
     image: str | None
     hire_date: date
+    contract_type: str
+    external_company_name: str | None
     available_leave_balance_days: int
     department_id: int | None
     team_id: int | None

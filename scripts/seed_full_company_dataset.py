@@ -162,6 +162,8 @@ class RoleAssignment:
     team_code: str | None = None
     leave_balance: int = 18
     is_super_admin: bool = False
+    contract_type: str = "INTERNAL"
+    external_company_name: str | None = None
 
 
 REQUEST_TYPE_DEFINITIONS = (
@@ -293,6 +295,7 @@ def build_employee_assignments() -> list[RoleAssignment]:
             for seat_index in range(DEFAULT_TEAM_SIZE):
                 first_name = FIRST_NAMES[(employee_number + team_index) % len(FIRST_NAMES)]
                 last_name = LAST_NAMES[(employee_number * 2 + team_index) % len(LAST_NAMES)]
+                is_external = (employee_number % 7) == 0
                 assignments.append(
                     RoleAssignment(
                         matricule=f"EMP-{employee_number:04d}",
@@ -303,6 +306,8 @@ def build_employee_assignments() -> list[RoleAssignment]:
                         department_code=department["code"],
                         team_code=team_code,
                         leave_balance=18 + (employee_number % 6),
+                        contract_type="EXTERNAL" if is_external else "INTERNAL",
+                        external_company_name="TechSolutions SARL" if is_external else None,
                     )
                 )
                 employee_number += 1
@@ -434,6 +439,8 @@ def ensure_user_and_employee(
             phone=None,
             image=None,
             hire_date=date(2024, 1, 1) + timedelta(days=user.id % 320),
+            contract_type=assignment.contract_type,
+            external_company_name=assignment.external_company_name,
             available_leave_balance_days=assignment.leave_balance,
             department_id=department.id if department is not None else None,
             team_id=team.id if team is not None else None,
@@ -450,6 +457,8 @@ def ensure_user_and_employee(
     employee.first_name = assignment.first_name
     employee.last_name = assignment.last_name
     employee.email = assignment.email
+    employee.contract_type = assignment.contract_type
+    employee.external_company_name = assignment.external_company_name
     employee.department_id = department.id if department is not None else None
     employee.team_id = team.id if team is not None else None
     employee.job_title_id = job_title.id

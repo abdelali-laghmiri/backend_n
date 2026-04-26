@@ -373,8 +373,13 @@ The employees module manages HR/business profiles separately from authentication
 - Route access is permission-driven with super-admin bypass.
 - `employees.read` protects list and detail endpoints.
 - `employees.create` and `employees.update` protect write operations.
+- Contract type (`INTERNAL`/`EXTERNAL`) is required for all employees.
+- External employees must have `external_company_name` set.
+- Internal employees must not have `external_company_name`.
+- `employees.view_contract_type` protects contract type visibility.
+- `employees.update_contract_type` protects contract type modifications.
 
-Create an employee:
+Create an internal employee:
 
 ```powershell
 $token = "paste-access-token-here"
@@ -385,9 +390,35 @@ $body = @{
     email = "aya.bennani@example.com"
     phone = "+212600000001"
     hire_date = "2026-03-23"
+    contract_type = "INTERNAL"
     available_leave_balance_days = 12
     department_id = 1
     team_id = 1
+    job_title_id = 1
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/employees" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Create an external employee (requires external_company_name):
+
+```powershell
+$token = "paste-access-token-here"
+$body = @{
+    matricule = "EMP-0002"
+    first_name = "Zakaria"
+    last_name = "El Fassi"
+    email = "zakaria.elfassi@techsol.local"
+    hire_date = "2026-03-23"
+    contract_type = "EXTERNAL"
+    external_company_name = "TechSolutions SARL"
+    available_leave_balance_days = 0
+    department_id = 1
     job_title_id = 1
 } | ConvertTo-Json
 
@@ -1154,6 +1185,126 @@ Invoke-RestMethod `
     -Headers @{ Authorization = "Bearer $token" }
 ```
 
+## Forgot Badge Module
+
+The forgot badge module enables employees to request temporary NFC card access when they forget their physical badge.
+
+Workflow:
+1. Any authenticated user with `forgot_badge.create` permission creates a forgot badge request.
+2. The request is visible to users with `forgot_badge.view_all` permission.
+3. Authorized users with `forgot_badge.manage` can approve/reject requests.
+4. On approval, a temporary NFC card is attached to the employee for the current day only.
+5. The employee can use the temporary card for CHECK_IN and CHECK_OUT normally.
+6. After CHECK_OUT, the temporary assignment is automatically released.
+7. The card becomes available again for other uses.
+
+Permissions:
+- `forgot_badge.create` - Create and cancel own forgot badge requests (all employees)
+- `forgot_badge.view_own` - View own forgot badge requests
+- `forgot_badge.view_all` - View all forgot badge requests
+- `forgot_badge.manage` - Approve, reject, complete forgot badge requests
+- `attendance.nfc.assign_temporary_card` - Assign temporary NFC cards
+- `attendance.nfc.release_temporary_card` - Manually release temporary NFC cards
+
+Create a forgot badge request:
+
+```powershell
+$token = "paste-access-token-here"
+$body = @{
+    reason = "Forgot my badge at home"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+List my forgot badge requests:
+
+```powershell
+$token = "paste-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests/me" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+List all forgot badge requests:
+
+```powershell
+$token = "paste-admin-access-token-here"
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests?status=PENDING" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
+Approve and attach temporary NFC card:
+
+```powershell
+$token = "paste-admin-access-token-here"
+$body = @{
+    nfc_card_id = 5
+    valid_for_date = "2026-04-26"
+    notes = "Temporary badge for today only"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests/1/approve" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Reject a forgot badge request:
+
+```powershell
+$token = "paste-admin-access-token-here"
+$body = @{
+    notes = "No temporary cards available today"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests/1/reject" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Cancel your own request:
+
+```powershell
+$token = "paste-access-token-here"
+$body = @{
+    reason = "Found my badge"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/requests/1/cancel" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Manually release temporary NFC card:
+
+```powershell
+$token = "paste-admin-access-token-here"
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8000/api/v1/forgot-badge/temporary-cards/release?employee_id=1&valid_for_date=2026-04-26" `
+    -Headers @{ Authorization = "Bearer $token" }
+```
+
 ## Internal Admin Dashboard
 
 The internal admin dashboard is a server-rendered control panel for the technical super admin only.
@@ -1208,6 +1359,7 @@ Main admin sections:
 - Request Fields
 - Request Steps
 - Requests
+- Forgot Badge Requests
 - Attendance Daily Summaries
 - Attendance Monthly Reports
 - Performance Objectives

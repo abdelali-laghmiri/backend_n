@@ -71,6 +71,8 @@ class EmployeesService:
             phone=payload.phone,
             image=payload.image,
             hire_date=payload.hire_date,
+            contract_type=payload.contract_type,
+            external_company_name=payload.external_company_name,
             available_leave_balance_days=payload.available_leave_balance_days,
             department_id=department_id,
             team_id=team_id,
@@ -159,6 +161,12 @@ class EmployeesService:
         final_phone = changes.get("phone", employee.phone)
         final_image = changes.get("image", employee.image)
         final_hire_date = changes.get("hire_date", employee.hire_date)
+        final_contract_type = changes.get(
+            "contract_type", employee.contract_type
+        )
+        final_external_company_name = changes.get(
+            "external_company_name", employee.external_company_name
+        )
         final_available_leave_balance_days = changes.get(
             "available_leave_balance_days",
             employee.available_leave_balance_days,
@@ -196,6 +204,8 @@ class EmployeesService:
         employee.phone = final_phone
         employee.image = final_image
         employee.hire_date = final_hire_date
+        employee.contract_type = final_contract_type
+        employee.external_company_name = final_external_company_name
         employee.available_leave_balance_days = final_available_leave_balance_days
         employee.department_id = department_id
         employee.team_id = team_id
@@ -223,12 +233,20 @@ class EmployeesService:
             "last_name": "Last name",
             "email": "Email",
             "hire_date": "Hire date",
+            "contract_type": "Contract type",
             "available_leave_balance_days": "Available leave balance days",
             "job_title_id": "Job title",
         }
         for field_name, label in required_fields.items():
             if field_name in changes and changes[field_name] is None:
                 raise EmployeesValidationError(f"{label} cannot be null.")
+
+        if changes.get("contract_type") == "EXTERNAL":
+            external_company = changes.get("external_company_name")
+            if not external_company or not str(external_company).strip():
+                raise EmployeesValidationError(
+                    "External company name is required when contract type is EXTERNAL."
+                )
 
     def _resolve_department_and_team(
         self,

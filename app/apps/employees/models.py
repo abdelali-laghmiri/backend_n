@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from enum import Enum
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -12,6 +13,13 @@ def utcnow() -> datetime:
     """Return a timezone-aware UTC timestamp."""
 
     return datetime.now(timezone.utc)
+
+
+class ContractTypeEnum(str, Enum):
+    """Employee contract type classification."""
+
+    INTERNAL = "INTERNAL"
+    EXTERNAL = "EXTERNAL"
 
 
 class Employee(Base):
@@ -33,6 +41,16 @@ class Employee(Base):
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     image: Mapped[str | None] = mapped_column(String(500), nullable=True)
     hire_date: Mapped[date] = mapped_column(Date, nullable=False)
+    contract_type: Mapped[str] = mapped_column(
+        String(20),
+        default=ContractTypeEnum.INTERNAL.value,
+        nullable=False,
+        index=True,
+    )
+    external_company_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
     available_leave_balance_days: Mapped[int] = mapped_column(
         Integer,
         default=0,
@@ -67,4 +85,4 @@ class Employee(Base):
     )
 
 
-__all__ = ["Employee"]
+__all__ = ["ContractTypeEnum", "Employee"]

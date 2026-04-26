@@ -16,6 +16,7 @@ from app.apps.attendance.models import (
     AttendanceStatusEnum,
     NfcCard,
 )
+from app.apps.forgot_badge.models import TemporaryNfcAssignment
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
     AttendanceNfcCardAssignRequest,
@@ -28,6 +29,7 @@ from app.apps.attendance.schemas import (
     AttendanceScanIngestResponse,
 )
 from app.apps.employees.models import Employee
+from app.apps.forgot_badge.service import ForgotBadgeService
 
 
 class AttendanceConflictError(RuntimeError):
@@ -68,13 +70,67 @@ class AttendanceService:
     ) -> tuple[AttendanceRawScanEvent, AttendanceDailySummary]:
         """Persist an NFC-based raw scan event and update the employee daily summary."""
 
-        employee = self._get_active_employee_by_nfc_uid(payload.nfc_uid)
-        return self._ingest_scan_for_employee(
+        nfc_card = self._get_nfc_card_by_uid(payload.nfc_uid)
+        assignment_id = None
+        is_temporary = False
+
+        if nfc_card.is_active:
+            permanent_employee = self.db.get(Employee, nfc_card.employee_id)
+            if permanent_employee is not None and permanent_employee.is_active:
+                employee = permanent_employee
+            else:
+                employee = self._resolve_temporary_employee(nfc_card, payload.scanned_at.date())
+                if employee is not None:
+                    is_temporary = True
+                else:
+                    raise AttendanceValidationError(
+                        "The NFC card is linked to an inactive employee."
+                    )
+        else:
+            employee = self._resolve_temporary_employee(nfc_card, payload.scanned_at.date())
+            if employee is None:
+                raise AttendanceValidationError(
+                    "The NFC card is not active and has no temporary assignment for today."
+                )
+            is_temporary = True
+
+        reader_type = self._map_attendance_type_to_reader_type(payload.attendance_type)
+        result = self._ingest_scan_for_employee(
             employee=employee,
-            reader_type=self._map_attendance_type_to_reader_type(payload.attendance_type),
+            reader_type=reader_type,
             scanned_at=payload.scanned_at,
             source=payload.source,
         )
+
+        if is_temporary and reader_type == AttendanceReaderTypeEnum.IN:
+            assignment = self._get_active_temporary_assignment_by_card(
+                nfc_card.id, payload.scanned_at.date()
+            )
+            if assignment is not None:
+                try:
+                    forgot_service = ForgotBadgeService(self.db)
+                    forgot_service.on_check_in_with_assignment_id(
+                        assignment_id=assignment.id,
+                        check_in_attendance_id=result[0].id,
+                    )
+                except Exception:
+                    pass
+
+        if is_temporary and reader_type == AttendanceReaderTypeEnum.OUT:
+            assignment = self._get_active_temporary_assignment_by_card(
+                nfc_card.id, payload.scanned_at.date()
+            )
+            if assignment is not None:
+                try:
+                    forgot_service = ForgotBadgeService(self.db)
+                    forgot_service.on_check_out_with_assignment_id(
+                        assignment_id=assignment.id,
+                        check_out_attendance_id=result[0].id,
+                    )
+                except Exception:
+                    pass
+
+        return result
 
     def assign_nfc_card(
         self,
@@ -656,6 +712,89 @@ class AttendanceService:
 
         duration_seconds = (last_check_out_at - first_check_in_at).total_seconds()
         return int(duration_seconds // 60)
+
+    def _resolve_temporary_nfc_assignment(
+        self,
+        *,
+        nfc_card_id: int,
+        valid_for_date: date,
+    ) -> tuple[int | None, int | None, int | None]:
+        """Resolve active temporary NFC assignment and return (assignment_id, employee_id, is_temporary)."""
+
+        try:
+            forgot_service = ForgotBadgeService(self.db)
+            employee = forgot_service.resolve_employee_by_temporary_card(
+                nfc_card_id=nfc_card_id,
+                valid_for_date=valid_for_date,
+            )
+            if employee is not None:
+                assignment = forgot_service.get_active_temporary_assignment(
+                    employee_id=employee.id,
+                    valid_for_date=valid_for_date,
+                )
+                if assignment is not None:
+                    return (assignment.id, employee.id, employee.id)
+        except Exception:
+            pass
+
+        return (None, None, None)
+
+    def _finalize_temporary_nfc_assignment(
+        self,
+        *,
+        assignment_id: int | None,
+        nfc_card_id: int,
+        check_out_attendance_id: int | None,
+    ) -> None:
+        """Finalize temporary NFC assignment after CHECK_OUT."""
+
+        if assignment_id is None:
+            return
+
+        try:
+            forgot_service = ForgotBadgeService(self.db)
+            forgot_service.on_check_out_with_assignment_id(
+                assignment_id=assignment_id,
+                check_out_attendance_id=check_out_attendance_id or 0,
+            )
+        except Exception:
+            pass
+
+    def _resolve_temporary_employee(
+        self,
+        nfc_card: NfcCard,
+        valid_for_date: date,
+    ) -> Employee | None:
+        """Resolve employee from active temporary NFC assignment."""
+
+        try:
+            forgot_service = ForgotBadgeService(self.db)
+            return forgot_service.resolve_employee_by_temporary_card(
+                nfc_card_id=nfc_card.id,
+                valid_for_date=valid_for_date,
+            )
+        except Exception:
+            return None
+
+    def _get_active_temporary_assignment_by_card(
+        self,
+        nfc_card_id: int,
+        valid_for_date: date,
+    ) -> TemporaryNfcAssignment | None:
+        """Get active temporary assignment by card and date."""
+
+        if "TemporaryNfcAssignment" not in dir():
+            from app.apps.forgot_badge.models import TemporaryNfcAssignment
+
+        return self.db.execute(
+            select(TemporaryNfcAssignment)
+            .where(
+                TemporaryNfcAssignment.nfc_card_id == nfc_card_id,
+                TemporaryNfcAssignment.valid_for_date == valid_for_date,
+                TemporaryNfcAssignment.status == "ACTIVE",
+            )
+            .limit(1)
+        ).scalar_one_or_none()
 
     def _derive_daily_summary_status(
         self,
