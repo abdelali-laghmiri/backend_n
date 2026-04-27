@@ -106,6 +106,45 @@ Run migrations against the Docker PostgreSQL database:
 docker compose exec backend python -m alembic upgrade head
 ```
 
+## Production Deployment Checklist
+
+1. Configure production environment variables.
+2. Confirm `APP_ENV=production` and `DEBUG=false`.
+3. Use a PostgreSQL `DATABASE_URL`.
+4. Run migrations:
+
+```powershell
+python -m alembic upgrade head
+```
+
+5. Seed the minimum operational records:
+
+```powershell
+python scripts/seed_minimal_production_data.py
+```
+
+This creates or verifies:
+
+- bootstrap super admin
+- canonical job titles
+- canonical permissions
+- provisional NFC cards `TEMP-001`, `TEMP-002`, `TEMP-003`
+
+6. Verify critical API flows:
+
+- create forgot badge request
+- approve request with one provisional NFC card
+- NFC CHECK_IN with the assigned temporary card
+- NFC CHECK_OUT with the assigned temporary card
+- confirm the card becomes available again at `GET /api/v1/attendance/nfc-cards?type=TEMPORARY&status=AVAILABLE`
+
+The application now refuses to start in production if:
+
+- `DEBUG=true`
+- `SECRET_KEY` is missing, default, or too short
+- SQLite is used instead of PostgreSQL
+- obvious default passwords are used for PostgreSQL or the bootstrap super admin
+
 ## Alembic Commands
 
 Create a migration after real models are added:

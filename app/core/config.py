@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated
 from urllib.parse import quote_plus, urlsplit
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.shared.enums import EnvironmentEnum
@@ -125,6 +125,46 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_production_safety(self) -> "Settings":
+        """Reject unsafe defaults when the app runs in production."""
+
+        if self.app_env != EnvironmentEnum.PRODUCTION:
+            return self
+
+        secret_value = self.secret_key.get_secret_value().strip()
+        postgres_password = self.postgres_password.get_secret_value().strip()
+        default_like_passwords = {
+            "postgres",
+            "password",
+            "password123",
+            "change-this-bootstrap-password",
+            "azer1234",
+        }
+
+        if self.debug:
+            raise ValueError("DEBUG must be false in production.")
+
+        if not secret_value or secret_value == "change-this-secret-in-production" or len(secret_value) < 32:
+            raise ValueError(
+                "SECRET_KEY must be set to a strong production value with at least 32 characters."
+            )
+
+        if self.is_sqlite:
+            raise ValueError("Production deployments must use PostgreSQL, not SQLite.")
+
+        if postgres_password.lower() in default_like_passwords:
+            raise ValueError("POSTGRES_PASSWORD must not use a default or weak value in production.")
+
+        if self.superadmin_password is not None:
+            superadmin_password = self.superadmin_password.get_secret_value().strip()
+            if superadmin_password.lower() in default_like_passwords:
+                raise ValueError(
+                    "SUPERADMIN_PASSWORD must not use a default or weak value in production."
+                )
+
+        return self
 
     @field_validator("database_url", mode="before")
     @classmethod
