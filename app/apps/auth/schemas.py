@@ -18,6 +18,7 @@ class AuthenticatedUserResponse(BaseModel):
     must_change_password: bool
     has_full_access: bool
     permissions: list[str]
+    contract_type: Literal["INTERNAL", "EXTERNAL"] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

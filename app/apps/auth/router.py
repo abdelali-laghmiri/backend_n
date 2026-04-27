@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.apps.auth.dependencies import get_auth_service, get_current_active_user
 from app.apps.auth.schemas import (
@@ -19,9 +21,11 @@ from app.apps.auth.service import (
     PasswordChangeError,
     RefreshTokenError,
 )
+from app.apps.employees.models import Employee
 from app.apps.permissions.dependencies import get_permissions_service
 from app.apps.permissions.service import PermissionsService
 from app.apps.users.models import User
+from app.core.dependencies import get_db_session
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -29,10 +33,17 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 def build_authenticated_user_response(
     user: User,
     permissions_service: PermissionsService,
+    db: Session | None = None,
 ) -> AuthenticatedUserResponse:
     """Build the authenticated user payload with resolved permissions."""
 
     effective_permissions = permissions_service.resolve_effective_permissions(user)
+    contract_type = None
+    if db:
+        stmt = select(Employee).where(Employee.user_id == user.id).limit(1)
+        employee = db.execute(stmt).scalar_one_or_none()
+        if employee:
+            contract_type = employee.contract_type
     return AuthenticatedUserResponse(
         id=user.id,
         matricule=user.matricule,
@@ -44,6 +55,7 @@ def build_authenticated_user_response(
         must_change_password=user.must_change_password,
         has_full_access=effective_permissions.has_full_access,
         permissions=effective_permissions.permissions,
+        contract_type=contract_type,
     )
 
 
@@ -57,6 +69,7 @@ def login(
     payload: LoginRequest,
     service: AuthService = Depends(get_auth_service),
     permissions_service: PermissionsService = Depends(get_permissions_service),
+    db: Session = Depends(get_db_session),
 ) -> LoginResponse:
     try:
         user = service.authenticate_user(
@@ -90,7 +103,7 @@ def login(
         expires_in=expires_in,
         refresh_token=refresh_token,
         refresh_expires_in=refresh_expires_in,
-        user=build_authenticated_user_response(user, permissions_service),
+        user=build_authenticated_user_response(user, permissions_service, db),
     )
 
 
@@ -104,6 +117,7 @@ def refresh_access_token(
     payload: RefreshTokenRequest,
     service: AuthService = Depends(get_auth_service),
     permissions_service: PermissionsService = Depends(get_permissions_service),
+    db: Session = Depends(get_db_session),
 ) -> RefreshTokenResponse:
     try:
         user, refresh_token, refresh_expires_in = service.rotate_refresh_token(
@@ -123,7 +137,7 @@ def refresh_access_token(
         expires_in=expires_in,
         refresh_token=refresh_token,
         refresh_expires_in=refresh_expires_in,
-        user=build_authenticated_user_response(user, permissions_service),
+        user=build_authenticated_user_response(user, permissions_service, db),
     )
 
 
@@ -136,8 +150,9 @@ def refresh_access_token(
 def read_current_user(
     current_user: User = Depends(get_current_active_user),
     permissions_service: PermissionsService = Depends(get_permissions_service),
+    db: Session = Depends(get_db_session),
 ) -> AuthenticatedUserResponse:
-    return build_authenticated_user_response(current_user, permissions_service)
+    return build_authenticated_user_response(current_user, permissions_service, db)
 
 
 @router.post(
@@ -151,6 +166,7 @@ def change_password(
     service: AuthService = Depends(get_auth_service),
     current_user: User = Depends(get_current_active_user),
     permissions_service: PermissionsService = Depends(get_permissions_service),
+    db: Session = Depends(get_db_session),
 ) -> ChangePasswordResponse:
     try:
         updated_user = service.change_password(
@@ -166,5 +182,5 @@ def change_password(
 
     return ChangePasswordResponse(
         detail="Password updated successfully.",
-        user=build_authenticated_user_response(updated_user, permissions_service),
+        user=build_authenticated_user_response(updated_user, permissions_service, db),
     )
