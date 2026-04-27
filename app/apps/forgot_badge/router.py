@@ -145,6 +145,9 @@ def approve_forgot_badge_request(
     payload: ForgotBadgeRequestApproveRequest = None,
     service: ForgotBadgeService = Depends(get_forgot_badge_service),
     current_user: User = Depends(require_permission("forgot_badge.manage")),
+    _temporary_card_user: User = Depends(
+        require_permission("attendance.nfc.assign_temporary_card")
+    ),
     attendance_service: AttendanceService = Depends(get_attendance_service),
 ) -> ForgotBadgeRequestWithAssignmentResponse:
     if payload is None:
@@ -316,12 +319,22 @@ def _build_request_with_employee_response(
         f"{employee.first_name} {employee.last_name}" if employee else "Unknown"
     )
     employee_matricule = employee.matricule if employee else "Unknown"
+    employee_department = None
+    if employee is not None and employee.department_id is not None:
+        from app.apps.organization.models import Department
+
+        department = service.db.get(Department, employee.department_id)
+        if department is not None:
+            employee_department = department.name
+
+    request_payload = service.build_request_response(request)
 
     return ForgotBadgeRequestWithEmployeeResponse(
         id=request.id,
         employee_id=request.employee_id,
         employee_matricule=employee_matricule,
         employee_name=employee_name,
+        employee_department=employee_department,
         user_id=request.user_id,
         status=request.status,
         reason=request.reason,
@@ -329,7 +342,11 @@ def _build_request_with_employee_response(
         handled_by_user_id=request.handled_by_user_id,
         handled_at=request.handled_at,
         nfc_card_id=request.nfc_card_id,
+        temporary_card_id=request_payload.temporary_card_id,
+        temporary_card_label=request_payload.temporary_card_label,
+        temporary_card_nfc_uid=request_payload.temporary_card_nfc_uid,
         valid_for_date=request.valid_for_date,
+        assignment_status=request_payload.assignment_status,
         notes=request.notes,
         created_at=request.created_at,
         updated_at=request.updated_at,

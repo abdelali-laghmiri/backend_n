@@ -97,7 +97,11 @@ Permission: forgot_badge.create (all authenticated users)
   "handled_by_user_id": null,
   "handled_at": null,
   "nfc_card_id": null,
+  "temporary_card_id": null,
+  "temporary_card_label": null,
+  "temporary_card_nfc_uid": null,
   "valid_for_date": null,
+  "assignment_status": null,
   "notes": null,
   "created_at": "2026-04-26T09:00:00Z",
   "updated_at": "2026-04-26T09:00:00Z"
@@ -125,6 +129,7 @@ Permission: forgot_badge.view_all
   "employee_id": 1,
   "employee_matricule": "EMP-0001",     // NEW field
   "employee_name": "Aya Bennani",        // NEW field
+  "employee_department": "Operations",   // NEW field
   "user_id": 1,
   "status": "PENDING",
   "reason": "Forgot my badge at home",
@@ -132,7 +137,11 @@ Permission: forgot_badge.view_all
   "handled_by_user_id": null,
   "handled_at": null,
   "nfc_card_id": null,
+  "temporary_card_id": null,
+  "temporary_card_label": null,
+  "temporary_card_nfc_uid": null,
   "valid_for_date": null,
+  "assignment_status": null,
   "notes": null,
   "created_at": "2026-04-26T09:00:00Z",
   "updated_at": "2026-04-26T09:00:00Z"
@@ -148,16 +157,39 @@ Permission: forgot_badge.view_all
 #### Approve request + attach temporary NFC card
 ```
 POST /api/v1/forgot-badge/requests/{id}/approve
-Permission: forgot_badge.manage
+Permission: forgot_badge.manage + attendance.nfc.assign_temporary_card
 ```
 
 **Request:**
 ```json
 {
   "nfc_card_id": 5,
+  "nfc_uid": "TEMP-UID-001",  // optional alternative selector
   "valid_for_date": "2026-04-26",
   "notes": "Temporary card for today only"
 }
+```
+
+Either `nfc_card_id` or `nfc_uid` is required.
+
+#### List available provisional NFC cards
+```
+GET /api/v1/attendance/nfc-cards?type=TEMPORARY&status=AVAILABLE
+Permission: attendance.nfc.view_cards or attendance.nfc.assign_temporary_card
+```
+
+**Response:**
+```json
+[
+  {
+    "id": 11,
+    "nfc_uid": "TEMP-UID-001",
+    "label": "TEMP-001",
+    "type": "TEMPORARY",
+    "status": "AVAILABLE",
+    "is_active": true
+  }
+]
 ```
 
 **Response:**

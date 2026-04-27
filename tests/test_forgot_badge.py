@@ -10,6 +10,7 @@ from app.apps.forgot_badge.models import (
     TemporaryNfcAssignment,
     TemporaryNfcAssignmentStatusEnum,
 )
+from app.apps.attendance.models import NfcCardStatusEnum, NfcCardTypeEnum
 from app.apps.forgot_badge.schemas import (
     ForgotBadgeRequestCreateRequest,
     ForgotBadgeRequestApproveRequest,
@@ -47,6 +48,17 @@ class ForgotBadgeSchemaValidationTests(unittest.TestCase):
         )
         self.assertEqual(payload.nfc_card_id, 1)
         self.assertEqual(payload.valid_for_date, date.today())
+
+    def test_approve_request_accepts_nfc_uid(self) -> None:
+        payload = ForgotBadgeRequestApproveRequest(
+            nfc_uid="temp-uid-001",
+            valid_for_date=date.today(),
+        )
+        self.assertEqual(payload.nfc_uid, "TEMP-UID-001")
+
+    def test_approve_request_requires_id_or_uid(self) -> None:
+        with self.assertRaises(Exception):
+            ForgotBadgeRequestApproveRequest(valid_for_date=date.today())
 
     def test_reject_request_with_notes(self) -> None:
         payload = ForgotBadgeRequestRejectRequest(notes="Card not available today")
@@ -97,6 +109,10 @@ class ForgotBadgeServiceTests(unittest.TestCase):
     def test_validate_temporary_card_available_rejects_active_for_other(self) -> None:
         mock_card = MagicMock()
         mock_card.id = 1
+        mock_card.card_type = NfcCardTypeEnum.TEMPORARY.value
+        mock_card.status = NfcCardStatusEnum.AVAILABLE.value
+        mock_card.employee_id = None
+        mock_card.is_active = True
 
         mock_assignment = MagicMock()
         mock_assignment.employee_id = 99
@@ -106,7 +122,7 @@ class ForgotBadgeServiceTests(unittest.TestCase):
 
         with self.assertRaises(ForgotBadgeConflictError) as ctx:
             self.service._validate_temporary_card_available(
-                nfc_card_id=1,
+                nfc_card=mock_card,
                 employee_id=1,
                 valid_for_date=date.today(),
             )
@@ -115,6 +131,10 @@ class ForgotBadgeServiceTests(unittest.TestCase):
     def test_validate_temporary_card_available_rejects_active_for_same(self) -> None:
         mock_card = MagicMock()
         mock_card.id = 1
+        mock_card.card_type = NfcCardTypeEnum.TEMPORARY.value
+        mock_card.status = NfcCardStatusEnum.AVAILABLE.value
+        mock_card.employee_id = None
+        mock_card.is_active = True
 
         mock_assignment = MagicMock()
         mock_assignment.employee_id = 1
@@ -124,13 +144,20 @@ class ForgotBadgeServiceTests(unittest.TestCase):
 
         with self.assertRaises(ForgotBadgeConflictError) as ctx:
             self.service._validate_temporary_card_available(
-                nfc_card_id=1,
+                nfc_card=mock_card,
                 employee_id=1,
                 valid_for_date=date.today(),
             )
         self.assertIn("already has an active temporary NFC card", str(ctx.exception))
 
     def test_validate_temporary_card_available_rejects_used_today(self) -> None:
+        mock_card = MagicMock()
+        mock_card.id = 1
+        mock_card.card_type = NfcCardTypeEnum.TEMPORARY.value
+        mock_card.status = NfcCardStatusEnum.AVAILABLE.value
+        mock_card.employee_id = None
+        mock_card.is_active = True
+
         mock_assignment = MagicMock()
         mock_assignment.employee_id = 99
         mock_assignment.status = TemporaryNfcAssignmentStatusEnum.USED.value
@@ -139,11 +166,36 @@ class ForgotBadgeServiceTests(unittest.TestCase):
 
         with self.assertRaises(ForgotBadgeConflictError) as ctx:
             self.service._validate_temporary_card_available(
-                nfc_card_id=1,
+                nfc_card=mock_card,
                 employee_id=1,
                 valid_for_date=date.today(),
             )
         self.assertIn("already used for a forgot badge session", str(ctx.exception))
+
+    def test_validate_temporary_card_available_rejects_non_temporary_card(self) -> None:
+        mock_card = MagicMock()
+        mock_card.card_type = NfcCardTypeEnum.PERMANENT.value
+
+        with self.assertRaises(ForgotBadgeValidationError):
+            self.service._validate_temporary_card_available(
+                nfc_card=mock_card,
+                employee_id=1,
+                valid_for_date=date.today(),
+            )
+
+    def test_validate_temporary_card_available_rejects_unavailable_card_status(self) -> None:
+        mock_card = MagicMock()
+        mock_card.card_type = NfcCardTypeEnum.TEMPORARY.value
+        mock_card.status = NfcCardStatusEnum.ASSIGNED.value
+        mock_card.employee_id = None
+        mock_card.is_active = True
+
+        with self.assertRaises(ForgotBadgeConflictError):
+            self.service._validate_temporary_card_available(
+                nfc_card=mock_card,
+                employee_id=1,
+                valid_for_date=date.today(),
+            )
 
     def test_reject_request_wrong_status(self) -> None:
         mock_request = MagicMock()

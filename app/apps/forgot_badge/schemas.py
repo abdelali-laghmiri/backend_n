@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.apps.forgot_badge.models import (
     ForgotBadgeRequestStatusEnum,
@@ -35,14 +35,31 @@ class ForgotBadgeRequestCreateRequest(BaseModel):
 class ForgotBadgeRequestApproveRequest(BaseModel):
     """Request schema for approving a forgot badge request."""
 
-    nfc_card_id: int = Field(ge=1)
+    nfc_card_id: int | None = Field(default=None, ge=1)
+    nfc_uid: str | None = Field(default=None, min_length=1, max_length=120)
     valid_for_date: date
     notes: str | None = Field(default=None, max_length=500)
+
+    @field_validator("nfc_uid")
+    @classmethod
+    def validate_nfc_uid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized_value = value.strip().upper()
+        return normalized_value or None
 
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, value: str | None) -> str | None:
         return normalize_optional_string(value)
+
+    @model_validator(mode="after")
+    def validate_card_selector(self) -> "ForgotBadgeRequestApproveRequest":
+        if self.nfc_card_id is None and self.nfc_uid is None:
+            raise ValueError("Either nfc_card_id or nfc_uid is required.")
+
+        return self
 
 
 class ForgotBadgeRequestRejectRequest(BaseModel):
@@ -90,7 +107,11 @@ class ForgotBadgeRequestResponse(BaseModel):
     handled_by_user_id: int | None
     handled_at: datetime | None
     nfc_card_id: int | None
+    temporary_card_id: int | None = None
+    temporary_card_label: str | None = None
+    temporary_card_nfc_uid: str | None = None
     valid_for_date: date | None
+    assignment_status: str | None = None
     notes: str | None
     created_at: datetime
     updated_at: datetime
@@ -105,6 +126,7 @@ class ForgotBadgeRequestWithEmployeeResponse(BaseModel):
     employee_id: int
     employee_matricule: str
     employee_name: str
+    employee_department: str | None = None
     user_id: int | None
     status: str
     reason: str | None
@@ -112,7 +134,11 @@ class ForgotBadgeRequestWithEmployeeResponse(BaseModel):
     handled_by_user_id: int | None
     handled_at: datetime | None
     nfc_card_id: int | None
+    temporary_card_id: int | None = None
+    temporary_card_label: str | None = None
+    temporary_card_nfc_uid: str | None = None
     valid_for_date: date | None
+    assignment_status: str | None = None
     notes: str | None
     created_at: datetime
     updated_at: datetime

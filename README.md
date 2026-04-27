@@ -174,6 +174,21 @@ This seed script is idempotent and rebuilds:
 - attendance data
 - request types and sample workflow requests
 
+## Temporary NFC Cards For Forgot Badge
+
+The backend supports a pool of pre-printed provisional NFC cards for forgot badge workflows.
+
+- Permanent cards stay attached to one employee and use `card_type=PERMANENT`.
+- Provisional cards stay unassigned in inventory and use `card_type=TEMPORARY`.
+- Available provisional cards can be queried with:
+
+```powershell
+GET /api/v1/attendance/nfc-cards?type=TEMPORARY&status=AVAILABLE
+```
+
+- Approving a forgot badge request can select a provisional card by `nfc_card_id` or `nfc_uid`.
+- After CHECK_OUT, the temporary assignment is closed and the provisional card becomes `AVAILABLE` again.
+
 Phase 1 bootstrap:
 
 - `POST /api/v1/setup/initialize` creates the first technical super admin from `.env`.

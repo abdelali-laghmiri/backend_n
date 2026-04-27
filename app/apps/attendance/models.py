@@ -38,18 +38,46 @@ class AttendanceStatusEnum(str, Enum):
     LEAVE = "leave"
 
 
+class NfcCardTypeEnum(str, Enum):
+    """Supported NFC card roles in the attendance system."""
+
+    PERMANENT = "PERMANENT"
+    TEMPORARY = "TEMPORARY"
+
+
+class NfcCardStatusEnum(str, Enum):
+    """Operational availability of an NFC card."""
+
+    AVAILABLE = "AVAILABLE"
+    ASSIGNED = "ASSIGNED"
+    DISABLED = "DISABLED"
+
+
 class NfcCard(Base):
     """Simple NFC card to employee mapping used for attendance resolution."""
 
     __tablename__ = "nfc_cards"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    employee_id: Mapped[int] = mapped_column(
+    employee_id: Mapped[int | None] = mapped_column(
         ForeignKey("employees.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     nfc_uid: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    label: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    card_type: Mapped[str] = mapped_column(
+        String(20),
+        default=NfcCardTypeEnum.PERMANENT.value,
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=NfcCardStatusEnum.ASSIGNED.value,
+        nullable=False,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -194,4 +222,6 @@ __all__ = [
     "AttendanceReaderTypeEnum",
     "AttendanceStatusEnum",
     "NfcCard",
+    "NfcCardStatusEnum",
+    "NfcCardTypeEnum",
 ]

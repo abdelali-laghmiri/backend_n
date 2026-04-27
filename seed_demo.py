@@ -258,6 +258,37 @@ def seed_demo_data():
             session.flush()
             print(f"  ↳ Created employee: {matricule} - {first_name} {last_name}")
             employees.append(employee)
+
+        # ============================================
+        # 5B) CREATE PROVISIONAL NFC CARDS
+        # ============================================
+        print("\n[5B] Creating provisional NFC cards...")
+
+        temporary_cards_data = [
+            ("TEMP-001", "TEMP-UID-001"),
+            ("TEMP-002", "TEMP-UID-002"),
+            ("TEMP-003", "TEMP-UID-003"),
+        ]
+
+        for label, nfc_uid in temporary_cards_data:
+            existing_card = session.execute(
+                select(NfcCard).where(NfcCard.nfc_uid == nfc_uid)
+            ).scalar_one_or_none()
+            if existing_card:
+                print(f"  ↳ Temporary card {label} already exists, reusing")
+                continue
+
+            session.add(
+                NfcCard(
+                    employee_id=None,
+                    nfc_uid=nfc_uid,
+                    label=label,
+                    card_type="TEMPORARY",
+                    status="AVAILABLE",
+                    is_active=True,
+                )
+            )
+            print(f"  ↳ Created provisional card: {label}")
         
         # ============================================
         # 6) CREATE PERMISSIONS
@@ -267,6 +298,8 @@ def seed_demo_data():
         permissions_data = [
             ("attendance.nfc.ingest", "Ingest NFC attendance events", "attendance"),
             ("attendance.read", "View attendance records", "attendance"),
+            ("attendance.nfc.view_cards", "View NFC card inventory", "attendance"),
+            ("attendance.nfc.assign_temporary_card", "Assign temporary NFC cards", "attendance"),
             ("announcements.read", "View announcements", "announcements"),
             ("messages.read", "View messages", "messages"),
             ("dashboard.read", "View dashboard", "dashboard"),
@@ -380,6 +413,7 @@ def seed_demo_data():
         print(f"Teams: {len(teams)}")
         print(f"Job Titles: {len(job_titles)}")
         print(f"Permissions: {len(permissions)}")
+        print("Provisional cards: 3")
         print("-" * 40)
         print("\nIMPORTANT:")
         print("- Scanner user has job title 'Scanner Operator' with attendance.nfc.ingest")

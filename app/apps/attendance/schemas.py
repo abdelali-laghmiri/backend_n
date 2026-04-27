@@ -9,6 +9,8 @@ from app.apps.attendance.models import (
     AttendanceEventTypeEnum,
     AttendanceReaderTypeEnum,
     AttendanceStatusEnum,
+    NfcCardStatusEnum,
+    NfcCardTypeEnum,
 )
 from app.shared.responses import ModuleStatusResponse
 
@@ -135,6 +137,17 @@ class AttendanceNfcCardResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class AttendanceNfcCardListResponse(BaseModel):
+    """Response used when listing existing NFC cards from inventory."""
+
+    id: int
+    nfc_uid: str
+    label: str | None
+    type: NfcCardTypeEnum
+    status: NfcCardStatusEnum
+    is_active: bool
 
 
 class AttendanceMonthlyReportGenerateRequest(BaseModel):

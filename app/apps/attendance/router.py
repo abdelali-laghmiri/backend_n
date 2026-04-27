@@ -9,6 +9,7 @@ from app.apps.attendance.models import AttendanceStatusEnum
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
     AttendanceNfcCardAssignRequest,
+    AttendanceNfcCardListResponse,
     AttendanceNfcCardResponse,
     AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
@@ -141,6 +142,44 @@ def assign_nfc_card(
 
 
 @router.get(
+    "/nfc-cards",
+    response_model=list[AttendanceNfcCardListResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List NFC cards",
+)
+def list_nfc_cards(
+    card_type: str | None = Query(default=None, alias="type"),
+    card_status: str | None = Query(default=None, alias="status"),
+    include_inactive: bool = Query(default=False),
+    valid_for_date: date | None = Query(default=None),
+    service: AttendanceService = Depends(get_attendance_service),
+    _current_user: User = Depends(
+        require_any_permission(
+            "attendance.nfc.view_cards",
+            "attendance.nfc.assign_temporary_card",
+            "attendance.nfc.assign_card",
+        )
+    ),
+) -> list[AttendanceNfcCardListResponse]:
+    try:
+        normalized_type = card_type.strip().upper() if card_type is not None else None
+        normalized_status = card_status.strip().upper() if card_status is not None else None
+        cards = service.list_nfc_cards(
+            card_type=None if normalized_type is None else service_module_card_type(normalized_type),
+            status=None if normalized_status is None else service_module_card_status(normalized_status),
+            include_inactive=include_inactive,
+            valid_for_date=valid_for_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return service.build_nfc_card_list_responses(cards)
+
+
+@router.get(
     "/daily-summaries",
     response_model=list[AttendanceDailySummaryResponse],
     status_code=status.HTTP_200_OK,
@@ -267,3 +306,21 @@ def get_monthly_report(
         raise_attendance_http_error(exc)
 
     return service.build_monthly_report_response(report)
+
+
+def service_module_card_type(value: str):
+    from app.apps.attendance.models import NfcCardTypeEnum
+
+    try:
+        return NfcCardTypeEnum(value)
+    except ValueError as exc:
+        raise ValueError("Invalid NFC card type filter.") from exc
+
+
+def service_module_card_status(value: str):
+    from app.apps.attendance.models import NfcCardStatusEnum
+
+    try:
+        return NfcCardStatusEnum(value)
+    except ValueError as exc:
+        raise ValueError("Invalid NFC card status filter.") from exc

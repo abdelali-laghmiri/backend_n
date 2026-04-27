@@ -15,7 +15,12 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_attendance_nfc_bootstrap.db"
 
 from app.apps.attendance.dependencies import get_attendance_service
 from app.apps.attendance.router import router as attendance_router
-from app.apps.attendance.models import AttendanceStatusEnum, NfcCard
+from app.apps.attendance.models import (
+    AttendanceStatusEnum,
+    NfcCard,
+    NfcCardStatusEnum,
+    NfcCardTypeEnum,
+)
 from app.apps.attendance.schemas import (
     AttendanceEventTypeEnum,
     AttendanceNfcCardAssignRequest,
@@ -32,6 +37,9 @@ from app.apps.auth.dependencies import get_current_active_user
 from app.apps.employees.models import Employee
 from app.apps.organization.models import JobTitle
 from app.apps.permissions.dependencies import get_permissions_service
+from app.apps.forgot_badge.models import TemporaryNfcAssignment
+from app.apps.forgot_badge.schemas import ForgotBadgeRequestApproveRequest
+from app.apps.forgot_badge.service import ForgotBadgeService, ForgotBadgeConflictError
 from app.apps.setup.service import SetupService
 from app.apps.users.models import User
 from app.db.base import Base
@@ -103,6 +111,7 @@ class AttendanceNfcTests(unittest.TestCase):
         )
         self.db: Session = self.session_factory()
         self.service = AttendanceService(db=self.db)
+        self.forgot_badge_service = ForgotBadgeService(db=self.db)
 
     def tearDown(self) -> None:
         self.db.close()
@@ -194,6 +203,8 @@ class AttendanceNfcTests(unittest.TestCase):
         self.assertEqual(nfc_card.employee_id, employee.id)
         self.assertEqual(nfc_card.nfc_uid, "04AABBCCDD11")
         self.assertTrue(nfc_card.is_active)
+        self.assertEqual(nfc_card.card_type, NfcCardTypeEnum.PERMANENT.value)
+        self.assertEqual(nfc_card.status, NfcCardStatusEnum.ASSIGNED.value)
 
     def test_assign_nfc_card_is_idempotent_for_same_employee_and_card(self) -> None:
         employee = self._seed_employee(nfc_uid="04AABBCCDD11")
@@ -303,15 +314,168 @@ class AttendanceNfcTests(unittest.TestCase):
             SetupService.DEFAULT_JOB_TITLE_PERMISSION_CODES["EMPLOYEE"],
         )
 
+    def test_list_available_temporary_cards_returns_only_existing_available_pool(self) -> None:
+        self._seed_employee(nfc_uid="PERM-001")
+        available_card = self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        assigned_card = self._seed_temporary_card(
+            "TEMP-002",
+            "TEMP-UID-002",
+            status=NfcCardStatusEnum.ASSIGNED.value,
+        )
+        disabled_card = self._seed_temporary_card(
+            "TEMP-003",
+            "TEMP-UID-003",
+            is_active=False,
+            status=NfcCardStatusEnum.DISABLED.value,
+        )
+        permanent_card = self.db.query(NfcCard).filter(NfcCard.nfc_uid == "PERM-001").one()
+
+        cards = self.service.list_nfc_cards(
+            card_type=NfcCardTypeEnum.TEMPORARY,
+            status=NfcCardStatusEnum.AVAILABLE,
+            valid_for_date=date(2026, 3, 29),
+        )
+
+        self.assertEqual([card.id for card in cards], [available_card.id])
+        self.assertNotIn(assigned_card.id, [card.id for card in cards])
+        self.assertNotIn(disabled_card.id, [card.id for card in cards])
+        self.assertNotIn(permanent_card.id, [card.id for card in cards])
+
+    def test_assigned_temporary_card_disappears_from_available_list(self) -> None:
+        employee = self._seed_employee()
+        manager = self._seed_employee()
+        card = self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        request = self._seed_forgot_badge_request(employee_id=employee.id, user_id=employee.user_id)
+
+        self.forgot_badge_service.approve_request(
+            request.id,
+            ForgotBadgeRequestApproveRequest(
+                nfc_card_id=card.id,
+                valid_for_date=date(2026, 3, 29),
+            ),
+            self.db.get(User, manager.user_id),
+        )
+
+        cards = self.service.list_nfc_cards(
+            card_type=NfcCardTypeEnum.TEMPORARY,
+            status=NfcCardStatusEnum.AVAILABLE,
+            valid_for_date=date(2026, 3, 29),
+        )
+
+        self.assertEqual(cards, [])
+        self.assertEqual(self.db.get(NfcCard, card.id).status, NfcCardStatusEnum.ASSIGNED.value)
+
+    def test_checkout_releases_temporary_card_and_it_becomes_available_again(self) -> None:
+        employee = self._seed_employee()
+        manager = self._seed_employee()
+        card = self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        request = self._seed_forgot_badge_request(employee_id=employee.id, user_id=employee.user_id)
+
+        self.forgot_badge_service.approve_request(
+            request.id,
+            ForgotBadgeRequestApproveRequest(
+                nfc_card_id=card.id,
+                valid_for_date=date(2026, 3, 29),
+            ),
+            self.db.get(User, manager.user_id),
+        )
+
+        self.service.ingest_nfc_scan_event(
+            AttendanceNfcScanIngestRequest(
+                nfc_uid="temp-uid-001",
+                attendance_type=AttendanceEventTypeEnum.CHECK_IN,
+                scanned_at=datetime(2026, 3, 29, 8, 0, tzinfo=timezone.utc),
+                source="nfc_terminal",
+            )
+        )
+        self.service.ingest_nfc_scan_event(
+            AttendanceNfcScanIngestRequest(
+                nfc_uid="temp-uid-001",
+                attendance_type=AttendanceEventTypeEnum.CHECK_OUT,
+                scanned_at=datetime(2026, 3, 29, 17, 0, tzinfo=timezone.utc),
+                source="nfc_terminal",
+            )
+        )
+
+        assignment = self.db.query(TemporaryNfcAssignment).filter(
+            TemporaryNfcAssignment.nfc_card_id == card.id
+        ).one()
+        cards = self.service.list_nfc_cards(
+            card_type=NfcCardTypeEnum.TEMPORARY,
+            status=NfcCardStatusEnum.AVAILABLE,
+            valid_for_date=date(2026, 3, 29),
+        )
+
+        self.assertEqual(assignment.status, "USED")
+        self.assertEqual(self.db.get(NfcCard, card.id).status, NfcCardStatusEnum.AVAILABLE.value)
+        self.assertEqual([listed_card.id for listed_card in cards], [card.id])
+
+    def test_cannot_assign_same_temporary_card_to_two_active_requests(self) -> None:
+        employee_one = self._seed_employee()
+        employee_two = self._seed_employee()
+        manager = self._seed_employee()
+        card = self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        request_one = self._seed_forgot_badge_request(
+            employee_id=employee_one.id,
+            user_id=employee_one.user_id,
+        )
+        request_two = self._seed_forgot_badge_request(
+            employee_id=employee_two.id,
+            user_id=employee_two.user_id,
+        )
+
+        manager_user = self.db.get(User, manager.user_id)
+        self.forgot_badge_service.approve_request(
+            request_one.id,
+            ForgotBadgeRequestApproveRequest(
+                nfc_card_id=card.id,
+                valid_for_date=date(2026, 3, 29),
+            ),
+            manager_user,
+        )
+
+        with self.assertRaises(ForgotBadgeConflictError):
+            self.forgot_badge_service.approve_request(
+                request_two.id,
+                ForgotBadgeRequestApproveRequest(
+                    nfc_card_id=card.id,
+                    valid_for_date=date(2026, 3, 29),
+                ),
+                manager_user,
+            )
+
+    def test_list_temporary_cards_endpoint_requires_permission(self) -> None:
+        self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        client = self._build_test_client(allowed_permissions=set())
+
+        response = client.get("/attendance/nfc-cards?type=TEMPORARY&status=AVAILABLE")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_list_temporary_cards_endpoint_returns_available_cards(self) -> None:
+        self._seed_temporary_card("TEMP-001", "TEMP-UID-001")
+        client = self._build_test_client(allowed_permissions={"attendance.nfc.view_cards"})
+
+        response = client.get("/attendance/nfc-cards?type=TEMPORARY&status=AVAILABLE")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["label"], "TEMP-001")
+        self.assertEqual(payload[0]["type"], "TEMPORARY")
+        self.assertEqual(payload[0]["status"], "AVAILABLE")
+
     def _seed_employee(
         self,
         *,
+        employee_id: int | None = None,
+        user_id: int | None = None,
         nfc_uid: str | None = None,
         card_is_active: bool = True,
         employee_is_active: bool = True,
     ) -> Employee:
-        next_id = int(self.db.query(User).count()) + 1
-        user = _make_user(next_id)
+        next_id = employee_id or int(self.db.query(User).count()) + 1
+        user = _make_user(user_id or next_id)
         job_title = _make_job_title(next_id)
         employee = _make_employee(
             next_id,
@@ -328,12 +492,50 @@ class AttendanceNfcTests(unittest.TestCase):
                 NfcCard(
                     employee_id=employee.id,
                     nfc_uid=nfc_uid,
+                    card_type=NfcCardTypeEnum.PERMANENT.value,
+                    status=NfcCardStatusEnum.ASSIGNED.value,
                     is_active=card_is_active,
                 )
             )
 
         self.db.commit()
         return employee
+
+    def _seed_temporary_card(
+        self,
+        label: str,
+        nfc_uid: str,
+        *,
+        is_active: bool = True,
+        status: str = NfcCardStatusEnum.AVAILABLE.value,
+    ) -> NfcCard:
+        card = NfcCard(
+            employee_id=None,
+            nfc_uid=nfc_uid,
+            label=label,
+            card_type=NfcCardTypeEnum.TEMPORARY.value,
+            status=status,
+            is_active=is_active,
+        )
+        self.db.add(card)
+        self.db.commit()
+        self.db.refresh(card)
+        return card
+
+    def _seed_forgot_badge_request(self, *, employee_id: int, user_id: int) -> object:
+        from app.apps.forgot_badge.models import ForgotBadgeRequest
+
+        request = ForgotBadgeRequest(
+            employee_id=employee_id,
+            user_id=user_id,
+            status="PENDING",
+            reason="Forgot badge",
+            requested_at=datetime(2026, 3, 29, 7, 45, tzinfo=timezone.utc),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+        return request
 
     def _build_test_client(self, *, allowed_permissions: set[str]) -> TestClient:
         app = FastAPI()

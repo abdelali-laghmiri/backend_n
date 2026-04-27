@@ -15,11 +15,14 @@ from app.apps.attendance.models import (
     AttendanceReaderTypeEnum,
     AttendanceStatusEnum,
     NfcCard,
+    NfcCardStatusEnum,
+    NfcCardTypeEnum,
 )
 from app.apps.forgot_badge.models import TemporaryNfcAssignment
 from app.apps.attendance.schemas import (
     AttendanceDailySummaryResponse,
     AttendanceNfcCardAssignRequest,
+    AttendanceNfcCardListResponse,
     AttendanceNfcCardResponse,
     AttendanceNfcScanIngestRequest,
     AttendanceMonthlyReportGenerateRequest,
@@ -74,23 +77,28 @@ class AttendanceService:
         assignment_id = None
         is_temporary = False
 
-        if nfc_card.is_active:
+        if nfc_card.card_type == NfcCardTypeEnum.PERMANENT.value:
+            if not nfc_card.is_active or nfc_card.status == NfcCardStatusEnum.DISABLED.value:
+                raise AttendanceValidationError(
+                    "The NFC card linked to this scan is inactive."
+                )
+
             permanent_employee = self.db.get(Employee, nfc_card.employee_id)
             if permanent_employee is not None and permanent_employee.is_active:
                 employee = permanent_employee
             else:
-                employee = self._resolve_temporary_employee(nfc_card, payload.scanned_at.date())
-                if employee is not None:
-                    is_temporary = True
-                else:
-                    raise AttendanceValidationError(
-                        "The NFC card is linked to an inactive employee."
-                    )
+                raise AttendanceValidationError(
+                    "The NFC card is linked to an inactive employee."
+                )
         else:
+            if not nfc_card.is_active or nfc_card.status == NfcCardStatusEnum.DISABLED.value:
+                raise AttendanceValidationError(
+                    "The NFC card is not active and has no temporary assignment for today."
+                )
             employee = self._resolve_temporary_employee(nfc_card, payload.scanned_at.date())
             if employee is None:
                 raise AttendanceValidationError(
-                    "The NFC card is not active and has no temporary assignment for today."
+                    "The NFC card is not assigned to an active temporary session for today."
                 )
             is_temporary = True
 
@@ -147,6 +155,11 @@ class AttendanceService:
         normalized_nfc_uid = self._normalize_nfc_uid(payload.nfc_uid)
         existing_card = self._find_nfc_card_by_uid(normalized_nfc_uid)
         if existing_card is not None:
+            if existing_card.card_type != NfcCardTypeEnum.PERMANENT.value:
+                raise AttendanceValidationError(
+                    "Temporary NFC cards cannot be permanently assigned to employees."
+                )
+
             if existing_card.employee_id != employee.id:
                 raise AttendanceConflictError(
                     "This NFC card is already assigned to another employee."
@@ -168,6 +181,9 @@ class AttendanceService:
         nfc_card = NfcCard(
             employee_id=employee.id,
             nfc_uid=normalized_nfc_uid,
+            label=None,
+            card_type=NfcCardTypeEnum.PERMANENT.value,
+            status=NfcCardStatusEnum.ASSIGNED.value,
             is_active=True,
         )
         self.db.add(nfc_card)
@@ -180,6 +196,48 @@ class AttendanceService:
 
         self.db.refresh(nfc_card)
         return nfc_card
+
+    def list_nfc_cards(
+        self,
+        *,
+        card_type: NfcCardTypeEnum | None = None,
+        status: NfcCardStatusEnum | None = None,
+        include_inactive: bool = False,
+        valid_for_date: date | None = None,
+    ) -> list[NfcCard]:
+        """List NFC cards with optional inventory filters."""
+
+        statement: Select[tuple[NfcCard]] = select(NfcCard)
+
+        if card_type is not None:
+            statement = statement.where(NfcCard.card_type == card_type.value)
+
+        if status is not None:
+            statement = statement.where(NfcCard.status == status.value)
+
+        if not include_inactive:
+            statement = statement.where(NfcCard.is_active.is_(True))
+
+        if card_type == NfcCardTypeEnum.TEMPORARY:
+            statement = statement.where(NfcCard.employee_id.is_(None))
+
+        cards = list(
+            self.db.execute(
+                statement.order_by(NfcCard.label.asc(), NfcCard.nfc_uid.asc(), NfcCard.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        if card_type == NfcCardTypeEnum.TEMPORARY and status == NfcCardStatusEnum.AVAILABLE:
+            target_date = valid_for_date or date.today()
+            cards = [
+                card
+                for card in cards
+                if not self._has_active_temporary_assignment(card.id, target_date)
+            ]
+
+        return cards
 
     def _ingest_scan_for_employee(
         self,
@@ -460,6 +518,14 @@ class AttendanceService:
             updated_at=nfc_card.updated_at,
         )
 
+    def build_nfc_card_list_responses(
+        self,
+        nfc_cards: list[NfcCard],
+    ) -> list[AttendanceNfcCardListResponse]:
+        """Build inventory list payloads for NFC cards."""
+
+        return [self._build_nfc_card_list_response(card) for card in nfc_cards]
+
     def build_daily_summary_responses(
         self,
         summaries: list[AttendanceDailySummary],
@@ -559,6 +625,21 @@ class AttendanceService:
             total_leave_days=report.total_leave_days,
             created_at=report.created_at,
             updated_at=report.updated_at,
+        )
+
+    def _build_nfc_card_list_response(
+        self,
+        nfc_card: NfcCard,
+    ) -> AttendanceNfcCardListResponse:
+        """Build a generic NFC inventory response payload."""
+
+        return AttendanceNfcCardListResponse(
+            id=nfc_card.id,
+            nfc_uid=nfc_card.nfc_uid,
+            label=nfc_card.label,
+            type=NfcCardTypeEnum(nfc_card.card_type),
+            status=NfcCardStatusEnum(nfc_card.status),
+            is_active=nfc_card.is_active,
         )
 
     def _resolve_report_target_employees(
@@ -844,8 +925,13 @@ class AttendanceService:
         """Return the active employee linked to an active NFC card."""
 
         nfc_card = self._get_nfc_card_by_uid(nfc_uid)
-        if not nfc_card.is_active:
+        if not nfc_card.is_active or nfc_card.status == NfcCardStatusEnum.DISABLED.value:
             raise AttendanceValidationError("The NFC card linked to this scan is inactive.")
+
+        if nfc_card.card_type != NfcCardTypeEnum.PERMANENT.value:
+            raise AttendanceValidationError(
+                "Temporary NFC cards must be resolved through forgot badge assignments."
+            )
 
         employee = self.db.get(Employee, nfc_card.employee_id)
         if employee is None:
@@ -887,11 +973,17 @@ class AttendanceService:
             select(NfcCard)
             .where(
                 NfcCard.employee_id == employee_id,
+                NfcCard.card_type == NfcCardTypeEnum.PERMANENT.value,
                 NfcCard.is_active.is_(True),
             )
             .order_by(NfcCard.id.asc())
             .limit(1)
         ).scalar_one_or_none()
+
+    def _has_active_temporary_assignment(self, nfc_card_id: int, valid_for_date: date) -> bool:
+        """Return whether the temporary card is in an active assignment for the target date."""
+
+        return self._get_active_temporary_assignment_by_card(nfc_card_id, valid_for_date) is not None
 
     def _get_employees_by_ids(self, employee_ids: set[int]) -> dict[int, Employee]:
         """Load employees in bulk by id."""

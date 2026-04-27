@@ -7,7 +7,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.apps.attendance.models import NfcCard
+from app.apps.attendance.models import NfcCard, NfcCardStatusEnum, NfcCardTypeEnum
 from app.apps.employees.models import Employee
 from app.apps.forgot_badge.models import (
     ForgotBadgeRequest,
@@ -21,14 +21,11 @@ from app.apps.forgot_badge.schemas import (
     ForgotBadgeRequestCompleteRequest,
     ForgotBadgeRequestCreateRequest,
     ForgotBadgeRequestRejectRequest,
+    ForgotBadgeRequestResponse,
     ForgotBadgeRequestWithAssignmentResponse,
     TemporaryNfcAssignmentResponse,
 )
 from app.apps.users.models import User
-
-if TYPE_CHECKING:
-    from app.apps.forgot_badge.schemas import ForgotBadgeRequestResponse
-
 
 class ForgotBadgeConflictError(RuntimeError):
     """Raised when a unique or state conflict prevents the operation."""
@@ -138,9 +135,9 @@ class ForgotBadgeService:
                 f"Cannot approve request with status '{request.status}'. Only PENDING requests can be approved."
             )
 
-        nfc_card = self._get_nfc_card(payload.nfc_card_id)
+        nfc_card = self._resolve_temporary_nfc_card(payload)
         self._validate_temporary_card_available(
-            nfc_card_id=nfc_card.id,
+            nfc_card=nfc_card,
             employee_id=request.employee_id,
             valid_for_date=payload.valid_for_date,
         )
@@ -167,6 +164,8 @@ class ForgotBadgeService:
             valid_for_date=payload.valid_for_date,
             status=TemporaryNfcAssignmentStatusEnum.ACTIVE.value,
         )
+        nfc_card.status = NfcCardStatusEnum.ASSIGNED.value
+        self.db.add(nfc_card)
         self.db.add(temporary_assignment)
         self.db.add(request)
 
@@ -317,6 +316,11 @@ class ForgotBadgeService:
             return
 
         assignment.status = TemporaryNfcAssignmentStatusEnum.USED.value
+        assignment.released_at = datetime.now(timezone.utc)
+        nfc_card = self.db.get(NfcCard, nfc_card_id)
+        if nfc_card is not None and nfc_card.card_type == NfcCardTypeEnum.TEMPORARY.value:
+            nfc_card.status = NfcCardStatusEnum.AVAILABLE.value
+            self.db.add(nfc_card)
         self.db.add(assignment)
 
         try:
@@ -341,6 +345,10 @@ class ForgotBadgeService:
         assignment.status = TemporaryNfcAssignmentStatusEnum.USED.value
         assignment.check_out_attendance_id = check_out_attendance_id
         assignment.released_at = datetime.now(timezone.utc)
+        nfc_card = self.db.get(NfcCard, assignment.nfc_card_id)
+        if nfc_card is not None and nfc_card.card_type == NfcCardTypeEnum.TEMPORARY.value:
+            nfc_card.status = NfcCardStatusEnum.AVAILABLE.value
+            self.db.add(nfc_card)
         self.db.add(assignment)
 
         try:
@@ -403,6 +411,7 @@ class ForgotBadgeService:
         """Build a request response with employee details."""
 
         employee = self.db.get(Employee, request.employee_id)
+        card_metadata = self._get_request_card_metadata(request)
         return ForgotBadgeRequestResponse(
             id=request.id,
             employee_id=request.employee_id,
@@ -413,7 +422,11 @@ class ForgotBadgeService:
             handled_by_user_id=request.handled_by_user_id,
             handled_at=request.handled_at,
             nfc_card_id=request.nfc_card_id,
+            temporary_card_id=card_metadata["temporary_card_id"],
+            temporary_card_label=card_metadata["temporary_card_label"],
+            temporary_card_nfc_uid=card_metadata["temporary_card_nfc_uid"],
             valid_for_date=request.valid_for_date,
+            assignment_status=card_metadata["assignment_status"],
             notes=request.notes,
             created_at=request.created_at,
             updated_at=request.updated_at,
@@ -425,6 +438,7 @@ class ForgotBadgeService:
     ) -> ForgotBadgeRequestResponse:
         """Build a request response."""
 
+        card_metadata = self._get_request_card_metadata(request)
         return ForgotBadgeRequestResponse(
             id=request.id,
             employee_id=request.employee_id,
@@ -435,7 +449,11 @@ class ForgotBadgeService:
             handled_by_user_id=request.handled_by_user_id,
             handled_at=request.handled_at,
             nfc_card_id=request.nfc_card_id,
+            temporary_card_id=card_metadata["temporary_card_id"],
+            temporary_card_label=card_metadata["temporary_card_label"],
+            temporary_card_nfc_uid=card_metadata["temporary_card_nfc_uid"],
             valid_for_date=request.valid_for_date,
+            assignment_status=card_metadata["assignment_status"],
             notes=request.notes,
             created_at=request.created_at,
             updated_at=request.updated_at,
@@ -506,15 +524,56 @@ class ForgotBadgeService:
 
         return card
 
+    def _resolve_temporary_nfc_card(
+        self,
+        payload: ForgotBadgeRequestApproveRequest,
+    ) -> NfcCard:
+        """Resolve the selected temporary NFC card from id or UID."""
+
+        if payload.nfc_card_id is not None:
+            return self._get_nfc_card(payload.nfc_card_id)
+
+        return self._get_nfc_card_by_uid(payload.nfc_uid or "")
+
+    def _get_nfc_card_by_uid(self, nfc_uid: str) -> NfcCard:
+        """Return an NFC card by normalized UID."""
+
+        normalized_nfc_uid = nfc_uid.strip().upper()
+        card = self.db.execute(
+            select(NfcCard)
+            .where(NfcCard.nfc_uid == normalized_nfc_uid)
+            .limit(1)
+        ).scalar_one_or_none()
+        if card is None:
+            raise ForgotBadgeNotFoundError("NFC card not found.")
+
+        return card
+
     def _validate_temporary_card_available(
         self,
-        nfc_card_id: int,
+        nfc_card: NfcCard,
         employee_id: int,
         valid_for_date: date,
     ) -> None:
         """Validate that the NFC card is available for temporary assignment."""
 
-        existing = self._get_temporary_assignment_by_card(nfc_card_id, valid_for_date)
+        if nfc_card.card_type != NfcCardTypeEnum.TEMPORARY.value:
+            raise ForgotBadgeValidationError(
+                "Only TEMPORARY NFC cards can be used for forgot badge assignments."
+            )
+
+        if not nfc_card.is_active or nfc_card.status == NfcCardStatusEnum.DISABLED.value:
+            raise ForgotBadgeConflictError("This NFC card is disabled or inactive.")
+
+        if nfc_card.employee_id is not None:
+            raise ForgotBadgeConflictError(
+                "Temporary NFC cards must not be permanently assigned to an employee."
+            )
+
+        if nfc_card.status != NfcCardStatusEnum.AVAILABLE.value:
+            raise ForgotBadgeConflictError("This NFC card is not currently available.")
+
+        existing = self._get_temporary_assignment_by_card(nfc_card.id, valid_for_date)
         if existing is not None and existing.status == TemporaryNfcAssignmentStatusEnum.ACTIVE.value:
             if existing.employee_id != employee_id:
                 raise ForgotBadgeConflictError(
@@ -550,6 +609,11 @@ class ForgotBadgeService:
             assignment.status = TemporaryNfcAssignmentStatusEnum.EXPIRED.value
             assignment.released_at = datetime.now(timezone.utc)
             self.db.add(assignment)
+
+        nfc_card = self.db.get(NfcCard, nfc_card_id)
+        if nfc_card is not None and nfc_card.card_type == NfcCardTypeEnum.TEMPORARY.value:
+            nfc_card.status = NfcCardStatusEnum.AVAILABLE.value
+            self.db.add(nfc_card)
 
     def _get_temporary_assignment_by_card(
         self,
@@ -594,6 +658,10 @@ class ForgotBadgeService:
 
         assignment.status = TemporaryNfcAssignmentStatusEnum.RELEASED.value
         assignment.released_at = datetime.now(timezone.utc)
+        nfc_card = self.db.get(NfcCard, assignment.nfc_card_id)
+        if nfc_card is not None and nfc_card.card_type == NfcCardTypeEnum.TEMPORARY.value:
+            nfc_card.status = NfcCardStatusEnum.AVAILABLE.value
+            self.db.add(nfc_card)
         self.db.add(assignment)
 
         try:
@@ -620,4 +688,26 @@ class ForgotBadgeService:
         if assignment is not None:
             assignment.status = TemporaryNfcAssignmentStatusEnum.RELEASED.value
             assignment.released_at = datetime.now(timezone.utc)
+            nfc_card = self.db.get(NfcCard, assignment.nfc_card_id)
+            if nfc_card is not None and nfc_card.card_type == NfcCardTypeEnum.TEMPORARY.value:
+                nfc_card.status = NfcCardStatusEnum.AVAILABLE.value
+                self.db.add(nfc_card)
             self.db.add(assignment)
+
+    def _get_request_card_metadata(self, request: ForgotBadgeRequest) -> dict[str, str | int | None]:
+        """Return display metadata for the temporary card linked to a request."""
+
+        card = self.db.get(NfcCard, request.nfc_card_id) if request.nfc_card_id is not None else None
+        assignment = self.db.execute(
+            select(TemporaryNfcAssignment)
+            .where(TemporaryNfcAssignment.forgot_badge_request_id == request.id)
+            .order_by(TemporaryNfcAssignment.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        return {
+            "temporary_card_id": card.id if card is not None else None,
+            "temporary_card_label": card.label if card is not None else None,
+            "temporary_card_nfc_uid": card.nfc_uid if card is not None else None,
+            "assignment_status": assignment.status if assignment is not None else None,
+        }
