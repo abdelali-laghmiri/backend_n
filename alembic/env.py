@@ -88,6 +88,8 @@ def run_migrations_online() -> None:
         return
 
     engine_options = get_engine_options(database_url, echo=False)
+    for option_name in ("pool_size", "max_overflow", "pool_timeout"):
+        engine_options.pop(option_name, None)
     engine_options["poolclass"] = pool.NullPool
     connectable = create_engine(database_url, **engine_options)
 

@@ -1,16 +1,27 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Response, status
+import logging
+
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app.apps import api_router
 from app.apps.scanner_app.origins import get_merged_browser_origins
 from app.core.config import settings
+from app.core.database import engine
 from app.core.database_init import initialize_database_schema
+from app.core.logging_config import setup_logging
+from app.core.middleware import RequestIDMiddleware
 from app.shared.constants import API_TAGS
-from app.shared.responses import HealthResponse
+from app.shared.responses import HealthDetailedResponse, HealthResponse
 from app.shared.uploads import UPLOADS_DIR, ensure_uploads_dir_exists
+
+logger = logging.getLogger(__name__)
+
+setup_logging(level=settings.log_level, fmt=settings.log_format)
 
 app = FastAPI(
     title=settings.project_name,
@@ -19,6 +30,25 @@ app = FastAPI(
     debug=settings.debug,
     openapi_tags=API_TAGS,
 )
+
+app.add_middleware(RequestIDMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a safe generic response for unexpected backend errors.
+
+    The exception is already logged by RequestIDMiddleware with full context,
+    so this handler only ensures no stack trace or sensitive detail leaks
+    to the client.
+
+    """
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An internal server error occurred."},
+    )
+
 
 ensure_uploads_dir_exists()
 
@@ -63,15 +93,38 @@ def read_root() -> HealthResponse:
     )
 
 
+def _check_database() -> str:
+    """Return database connectivity status."""
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return "connected"
+    except Exception as exc:
+        logger.error("Database connectivity check failed", exc_info=True)
+        return "unconnected"
+
+
 @app.get(
     "/health",
-    response_model=HealthResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=HealthDetailedResponse,
     tags=["Health"],
-    summary="Application health check",
+    summary="Application health check with database connectivity",
 )
-def health_check() -> HealthResponse:
-    return HealthResponse(status="ok", detail="Service is healthy.")
+def health_check() -> JSONResponse:
+    db_status = _check_database()
+    overall = "ok" if db_status == "connected" else "unhealthy"
+    http_code = status.HTTP_200_OK if db_status == "connected" else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(
+        content=HealthDetailedResponse(
+            status=overall,
+            detail="Service is healthy." if db_status == "connected" else "Database is unreachable.",
+            database=db_status,
+            environment=settings.app_env.value,
+            version=settings.project_version,
+        ).model_dump(),
+        status_code=http_code,
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)

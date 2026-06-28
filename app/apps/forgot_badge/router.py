@@ -81,10 +81,12 @@ def create_forgot_badge_request(
     summary="List my forgot badge requests",
 )
 def list_my_forgot_badge_requests(
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: ForgotBadgeService = Depends(get_forgot_badge_service),
     current_user: User = Depends(require_permission("forgot_badge.view_own")),
 ) -> list[ForgotBadgeRequestResponse]:
-    requests = service.list_own_requests(current_user=current_user)
+    requests = service.list_own_requests(current_user=current_user, limit=limit, offset=offset)
     return [service.build_request_response(r) for r in requests]
 
 
@@ -99,6 +101,8 @@ def list_forgot_badge_requests(
     status_filter: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: ForgotBadgeService = Depends(get_forgot_badge_service),
     current_user: User = Depends(require_permission("forgot_badge.view_all")),
 ) -> list[ForgotBadgeRequestWithEmployeeResponse]:
@@ -108,6 +112,8 @@ def list_forgot_badge_requests(
             status=status_filter,
             date_from=date_from,
             date_to=date_to,
+            limit=limit,
+            offset=offset,
         )
     except ForgotBadgeValidationError as exc:
         raise_forgot_badge_http_error(exc)

@@ -66,6 +66,34 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("DB_ECHO", "APP_DB_ECHO"),
     )
+    db_pool_size: int = Field(
+        default=5,
+        validation_alias="DB_POOL_SIZE",
+        gt=0,
+    )
+    db_max_overflow: int = Field(
+        default=10,
+        validation_alias="DB_MAX_OVERFLOW",
+        ge=0,
+    )
+    db_pool_timeout: int = Field(
+        default=30,
+        validation_alias="DB_POOL_TIMEOUT",
+        gt=0,
+    )
+    db_pool_recycle: int = Field(
+        default=1800,
+        validation_alias="DB_POOL_RECYCLE",
+        gt=0,
+    )
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("LOG_LEVEL", "APP_LOG_LEVEL"),
+    )
+    log_format: str = Field(
+        default="json",
+        validation_alias=AliasChoices("LOG_FORMAT", "APP_LOG_FORMAT"),
+    )
 
     database_url: str | None = Field(
         default="sqlite:///./hr_management.db",
@@ -118,6 +146,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="SCANNER_LINUX_PACKAGE_URL",
     )
+    supabase_url: str | None = Field(
+        default=None,
+        validation_alias="SUPABASE_URL",
+    )
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="SUPABASE_SERVICE_ROLE_KEY",
+    )
+    supabase_storage_bucket_announcements: str = Field(
+        default="announcement-attachments",
+        validation_alias="SUPABASE_STORAGE_BUCKET_ANNOUNCEMENTS",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -154,7 +194,7 @@ class Settings(BaseSettings):
         if self.is_sqlite:
             raise ValueError("Production deployments must use PostgreSQL, not SQLite.")
 
-        if postgres_password.lower() in default_like_passwords:
+        if not self.database_url and postgres_password.lower() in default_like_passwords:
             raise ValueError("POSTGRES_PASSWORD must not use a default or weak value in production.")
 
         if self.superadmin_password is not None:

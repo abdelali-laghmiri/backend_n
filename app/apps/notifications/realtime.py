@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
 
 from fastapi import WebSocket
+
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationsConnectionManager:
@@ -62,6 +66,10 @@ class NotificationsConnectionManager:
                 try:
                     await connection.send_json(dict(payload))
                 except Exception:
+                    logger.debug(
+                        "Removing stale WebSocket for user %s", user_id,
+                        exc_info=True,
+                    )
                     stale_connections.append(connection)
 
         for connection in stale_connections:

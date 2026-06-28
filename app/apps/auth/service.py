@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
@@ -7,10 +8,12 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.apps.auth.models import AuthRefreshTokenSession
+from app.apps.auth.models import AuthRefreshTokenSession, AuthRefreshTokenSession  # noqa: F811
 from app.apps.users.models import User
 from app.core.config import Settings
 from app.core.security import JWTManager, PasswordManager, TokenValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(RuntimeError):
@@ -41,11 +44,23 @@ class AuthService:
 
         user = self.get_user_by_matricule(matricule)
         if user is None or not PasswordManager.verify_password(password, user.password_hash):
+            logger.warning(
+                "Authentication failure: invalid credentials for matricule",
+                extra={"matricule": matricule},
+            )
             raise AuthenticationError("Incorrect matricule or password.")
 
         if not user.is_active:
-            raise InactiveUserError("Inactive user accounts cannot sign in.")
+            logger.warning(
+                "Authentication failure: inactive account for matricule",
+                extra={"matricule": matricule},
+            )
+            raise AuthenticationError("Incorrect matricule or password.")
 
+        logger.info(
+            "Authentication success for matricule",
+            extra={"matricule": matricule, "user_id": user.id},
+        )
         return user
 
     def create_access_token_for_user(self, user: User) -> tuple[str, int]:
@@ -109,11 +124,11 @@ class AuthService:
         if session.expires_at <= now:
             raise RefreshTokenError("Refresh token has expired.")
         if device_id and session.device_id and device_id != session.device_id:
-            raise RefreshTokenError("Refresh token does not match this device.")
+            raise RefreshTokenError("Refresh token is invalid.")
 
         user = self.get_user_by_id(session.user_id)
         if user is None:
-            raise RefreshTokenError("User for refresh token no longer exists.")
+            raise RefreshTokenError("Refresh token is invalid.")
         self.ensure_active_user(user)
 
         session.revoked_at = now
@@ -158,7 +173,7 @@ class AuthService:
         """Ensure that the resolved authenticated user is active."""
 
         if not user.is_active:
-            raise InactiveUserError("Inactive user accounts cannot access this resource.")
+            raise InactiveUserError("Access denied.")
 
         return user
 

@@ -15,6 +15,13 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class GenderEnum(str, Enum):
+    """Employee gender classification."""
+
+    MALE = "MALE"
+    FEMALE = "FEMALE"
+
+
 class ContractTypeEnum(str, Enum):
     """Employee contract type classification."""
 
@@ -41,6 +48,11 @@ class Employee(Base):
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     image: Mapped[str | None] = mapped_column(String(500), nullable=True)
     hire_date: Mapped[date] = mapped_column(Date, nullable=False)
+    gender: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        index=True,
+    )
     contract_type: Mapped[str] = mapped_column(
         String(20),
         default=ContractTypeEnum.INTERNAL.value,
@@ -85,4 +97,4 @@ class Employee(Base):
     )
 
 
-__all__ = ["ContractTypeEnum", "Employee"]
+__all__ = ["ContractTypeEnum", "Employee", "GenderEnum"]

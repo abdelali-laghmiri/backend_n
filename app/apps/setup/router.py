@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.apps.auth.dependencies import get_current_super_admin
@@ -27,6 +29,8 @@ from app.apps.setup.schemas import (
     SetupWizardReviewSummaryResponse,
     SetupWizardStateResponse,
 )
+logger = logging.getLogger(__name__)
+
 from app.apps.setup.service import (
     SetupAlreadyInitializedError,
     SetupConfigurationError,
@@ -475,7 +479,11 @@ def migrate_to_canonical_permissions(
                 """), {"code": code, "name": name, "desc": desc, "module": module})
                 results["inserted"] += result.rowcount
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to seed permission %s (%s)",
+                    code, module,
+                    exc_info=True,
+                )
         
         # 2. Update legacy to canonical
         updates = [
@@ -504,7 +512,11 @@ def migrate_to_canonical_permissions(
                 """), {"old": old_code, "new": new_code})
                 results["updated"] += result.rowcount
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to update permission %s -> %s",
+                    old_code, new_code,
+                    exc_info=True,
+                )
         
         db.commit()
         
@@ -554,7 +566,11 @@ def migrate_to_canonical_permissions(
                             """), {"jt_id": jt[0], "p_id": p[0]})
                             results["assigned"] += 1
                         except Exception:
-                            pass
+                            logger.warning(
+                                "Failed to assign permission %s to job title %s",
+                                p_code, jt_code,
+                                exc_info=True,
+                            )
         
         db.commit()
         

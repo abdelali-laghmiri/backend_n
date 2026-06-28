@@ -128,14 +128,15 @@ def reply_to_message(
 )
 def list_available_recipient_users(
     q: str | None = Query(default=None, max_length=120),
-    limit: int | None = Query(default=100, ge=1, le=300),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: MessagesService = Depends(get_messages_service),
     current_user: User = Depends(
         require_any_permission("messages.read_users", "messages.send")
     ),
 ) -> list[MessageRecipientCandidateResponse]:
     try:
-        return service.list_available_recipients(current_user, q=q, limit=limit)
+        return service.list_available_recipients(current_user, q=q, limit=limit, offset=offset)
     except MessagesAuthorizationError as exc:
         raise_messages_http_error(exc)
 
@@ -148,7 +149,8 @@ def list_available_recipient_users(
 )
 def list_inbox_messages(
     unread_only: bool = Query(default=False),
-    limit: int | None = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: MessagesService = Depends(get_messages_service),
     current_user: User = Depends(require_permission("messages.read")),
 ) -> list[MessageListItemResponse]:
@@ -157,6 +159,7 @@ def list_inbox_messages(
             current_user,
             unread_only=unread_only,
             limit=limit,
+            offset=offset,
         )
     except (
         MessagesAuthorizationError,
@@ -172,12 +175,13 @@ def list_inbox_messages(
     summary="List messages sent by the current user",
 )
 def list_sent_messages(
-    limit: int | None = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: MessagesService = Depends(get_messages_service),
     current_user: User = Depends(require_permission("messages.read")),
 ) -> list[MessageListItemResponse]:
     try:
-        return service.list_sent(current_user, limit=limit)
+        return service.list_sent(current_user, limit=limit, offset=offset)
     except MessagesValidationError as exc:
         raise_messages_http_error(exc)
 

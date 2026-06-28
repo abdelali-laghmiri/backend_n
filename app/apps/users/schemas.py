@@ -4,6 +4,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.security import validate_password_complexity
+
 
 def normalize_required_string(value: str) -> str:
     """Normalize required user strings."""
@@ -81,10 +83,15 @@ class UserCreateRequest(BaseModel):
     def validate_matricule(cls, value: str) -> str:
         return normalize_required_string(value).upper()
 
-    @field_validator("first_name", "last_name", "password")
+    @field_validator("first_name", "last_name")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         return normalize_required_string(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return validate_password_complexity(normalize_required_string(value))
 
     @field_validator("email")
     @classmethod
@@ -115,13 +122,21 @@ class UserUpdateRequest(BaseModel):
 
         return normalize_required_string(value).upper()
 
-    @field_validator("first_name", "last_name", "password")
+    @field_validator("first_name", "last_name")
     @classmethod
     def validate_optional_required_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
 
         return normalize_required_string(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_optional_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return validate_password_complexity(normalize_required_string(value))
 
     @field_validator("email")
     @classmethod

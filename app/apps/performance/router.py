@@ -117,6 +117,8 @@ def update_team_objective(
 def list_team_objectives(
     team_id: int | None = Query(default=None, ge=1),
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: PerformanceService = Depends(get_performance_service),
     _current_user: User = Depends(require_permission("performance.manage")),
 ) -> list[TeamObjectiveResponse]:
@@ -124,6 +126,8 @@ def list_team_objectives(
         objectives = service.list_team_objectives(
             team_id=team_id,
             include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
         )
     except (PerformanceNotFoundError, PerformanceValidationError) as exc:
         raise_performance_http_error(exc)
@@ -184,6 +188,8 @@ def list_daily_performances(
     team_id: int | None = Query(default=None, ge=1),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: PerformanceService = Depends(get_performance_service),
     current_user: User = Depends(require_permission("performance.read")),
 ) -> list[TeamDailyPerformanceResponse]:
@@ -193,6 +199,8 @@ def list_daily_performances(
             team_id=team_id,
             date_from=date_from,
             date_to=date_to,
+            limit=limit,
+            offset=offset,
         )
     except (
         PerformanceAuthorizationError,

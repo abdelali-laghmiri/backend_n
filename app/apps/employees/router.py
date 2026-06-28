@@ -87,6 +87,8 @@ def list_employees(
     department_id: int | None = Query(default=None, ge=1),
     team_id: int | None = Query(default=None, ge=1),
     job_title_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: EmployeesService = Depends(get_employees_service),
     _current_user: User = Depends(require_permission("employees.read")),
 ) -> list[EmployeeResponse]:
@@ -96,6 +98,8 @@ def list_employees(
         department_id=department_id,
         team_id=team_id,
         job_title_id=job_title_id,
+        limit=limit,
+        offset=offset,
     )
     return [EmployeeResponse.model_validate(item) for item in employees]
 

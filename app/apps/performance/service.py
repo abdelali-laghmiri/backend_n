@@ -96,8 +96,10 @@ class PerformanceService:
         *,
         team_id: int | None = None,
         include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[TeamObjective]:
-        """List team objectives with optional filters."""
+        """List team objectives with optional filters and pagination."""
 
         statement: Select[tuple[TeamObjective]] = select(TeamObjective)
         if team_id is not None:
@@ -112,7 +114,7 @@ class PerformanceService:
             TeamObjective.is_active.desc(),
             TeamObjective.created_at.desc(),
             TeamObjective.id.desc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_team_objective(self, objective_id: int) -> TeamObjective:
@@ -186,6 +188,8 @@ class PerformanceService:
         team_id: int | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[TeamDailyPerformance]:
         """List daily performance records visible to the current user."""
 
@@ -213,7 +217,7 @@ class PerformanceService:
             TeamDailyPerformance.performance_date.desc(),
             TeamDailyPerformance.team_id.asc(),
             TeamDailyPerformance.id.desc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_daily_performance(

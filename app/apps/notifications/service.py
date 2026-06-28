@@ -74,7 +74,8 @@ class NotificationsService:
         current_user: User,
         *,
         unread_only: bool = False,
-        limit: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Notification]:
         """List notifications belonging only to the authenticated user."""
 
@@ -84,9 +85,7 @@ class NotificationsService:
         if unread_only:
             statement = statement.where(Notification.is_read.is_(False))
 
-        statement = statement.order_by(Notification.created_at.desc(), Notification.id.desc())
-        if limit is not None:
-            statement = statement.limit(limit)
+        statement = statement.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit).offset(offset)
 
         return list(self.db.execute(statement).scalars().all())
 

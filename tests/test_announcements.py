@@ -3,10 +3,13 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import unittest.mock
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,7 +34,7 @@ from app.apps.permissions.dependencies import get_permissions_service
 from app.apps.setup.service import SetupService
 from app.apps.users.models import User
 from app.db.base import Base
-from app.shared import uploads as uploads_module
+from app.shared.uploads import ManagedUploadValidationError, StoredUploadFile
 
 API_PREFIX = settings.api_v1_prefix
 
@@ -74,33 +77,123 @@ class AnnouncementsTests(unittest.TestCase):
         self.db.add(self.other_user)
         self.db.commit()
 
-        self.original_static_dir = uploads_module.STATIC_DIR
-        self.original_uploads_dir = uploads_module.UPLOADS_DIR
-        self.original_attachment_storage_root = (
-            announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT
+        self.attachment_temp_dir = Path(self.temp_dir.name) / "attachments"
+        self.attachment_temp_dir.mkdir(parents=True, exist_ok=True)
+
+        self._store_patcher = unittest.mock.patch.object(
+            announcements_router_module,
+            "store_announcement_upload",
+            self._mock_store_announcement_upload,
         )
-        uploads_module.STATIC_DIR = Path(self.temp_dir.name) / "static"
-        uploads_module.UPLOADS_DIR = uploads_module.STATIC_DIR / "uploads"
-        attachment_storage_root = Path(self.temp_dir.name) / "protected_uploads"
-        announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
-            attachment_storage_root
+        self._store_patcher.start()
+        self._signed_url_patcher = unittest.mock.patch.object(
+            announcements_router_module,
+            "build_announcement_attachment_signed_url",
+            self._mock_build_announcement_attachment_signed_url,
         )
-        announcements_router_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
-            attachment_storage_root
+        self._signed_url_patcher.start()
+        self._delete_patcher = unittest.mock.patch.object(
+            announcements_router_module,
+            "delete_announcement_attachment_file",
+            self._mock_delete_announcement_attachment_file,
         )
+        self._delete_patcher.start()
+        self._resolve_path_patcher = unittest.mock.patch.object(
+            announcement_storage_module,
+            "resolve_announcement_attachment_path",
+            self._mock_resolve_announcement_attachment_path,
+            create=True,
+        )
+        self._resolve_path_patcher.start()
 
     def tearDown(self) -> None:
-        uploads_module.STATIC_DIR = self.original_static_dir
-        uploads_module.UPLOADS_DIR = self.original_uploads_dir
-        announcement_storage_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
-            self.original_attachment_storage_root
-        )
-        announcements_router_module.ANNOUNCEMENT_ATTACHMENT_STORAGE_ROOT = (
-            self.original_attachment_storage_root
-        )
+        self._store_patcher.stop()
+        self._signed_url_patcher.stop()
+        self._delete_patcher.stop()
+        self._resolve_path_patcher.stop()
         self.db.close()
         self.engine.dispose()
         self.temp_dir.cleanup()
+
+    async def _mock_store_announcement_upload(
+        self,
+        upload,
+        *,
+        allowed_content_types,
+        allowed_suffixes,
+        max_bytes,
+    ) -> StoredUploadFile:
+        if not upload.filename:
+            await upload.close()
+            raise ManagedUploadValidationError("Uploaded file name is required.")
+
+        content_type = (upload.content_type or "").lower()
+        original_suffix = Path(upload.filename).suffix.lower()
+        is_allowed_content_type = content_type in allowed_content_types
+        is_allowed_suffix = original_suffix in allowed_suffixes
+
+        if not is_allowed_content_type and not is_allowed_suffix:
+            await upload.close()
+            raise ManagedUploadValidationError("Uploaded file type is not supported.")
+
+        file_bytes = await upload.read(max_bytes + 1)
+        await upload.close()
+
+        if not file_bytes:
+            raise ManagedUploadValidationError("Uploaded file cannot be empty.")
+
+        if len(file_bytes) > max_bytes:
+            raise ManagedUploadValidationError(
+                f"Uploaded file must be {max_bytes // (1024 * 1024)} MB or smaller."
+            )
+
+        file_extension = (
+            original_suffix
+            if is_allowed_suffix and original_suffix
+            else allowed_content_types.get(content_type, original_suffix)
+        )
+        if not file_extension:
+            file_extension = ".bin"
+
+        normalized_content_type = content_type or "application/octet-stream"
+        stored_file_name = f"{uuid.uuid4().hex}{file_extension}"
+        file_url = f"announcements/{stored_file_name}"
+
+        file_path = self.attachment_temp_dir / file_url
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(file_bytes)
+
+        return StoredUploadFile(
+            original_file_name=Path(upload.filename).name,
+            stored_file_name=stored_file_name,
+            file_url=file_url,
+            content_type=normalized_content_type,
+            file_extension=file_extension,
+            file_size_bytes=len(file_bytes),
+        )
+
+    def _mock_build_announcement_attachment_signed_url(
+        self,
+        attachment: AnnouncementAttachment,
+        *,
+        expires_in_seconds: int = 120,
+    ) -> str:
+        return f"/_test_serve_file/{attachment.file_url}"
+
+    def _mock_delete_announcement_attachment_file(self, file_url: str | None) -> None:
+        if not file_url:
+            return
+        file_path = self.attachment_temp_dir / file_url
+        if file_path.exists():
+            file_path.unlink()
+
+    def _mock_resolve_announcement_attachment_path(
+        self,
+        attachment: AnnouncementAttachment,
+    ) -> Path | None:
+        if not attachment.file_url:
+            return None
+        return self.attachment_temp_dir / attachment.file_url
 
     def test_mark_seen_is_idempotent_per_user(self) -> None:
         announcement = self._create_announcement(
@@ -393,6 +486,14 @@ class AnnouncementsTests(unittest.TestCase):
     ) -> TestClient:
         app = FastAPI()
         app.include_router(announcements_router, prefix=API_PREFIX)
+
+        @app.get("/_test_serve_file/{file_name:path}")
+        def _serve_test_attachment(file_name: str):
+            file_path = self.attachment_temp_dir / file_name
+            if file_path.exists():
+                return FileResponse(str(file_path))
+            return Response(status_code=404)
+
         request_user = _make_user(user_id or self.current_user.id)
 
         class StubPermissionsService:

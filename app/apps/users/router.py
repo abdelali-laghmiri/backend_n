@@ -100,7 +100,8 @@ def get_users_status(
 def list_users(
     include_inactive: bool = Query(default=False),
     q: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: UsersService = Depends(get_users_service),
     _current_user: User = Depends(get_current_super_admin),
 ) -> list[UserResponse]:
@@ -108,6 +109,7 @@ def list_users(
         q=q,
         include_inactive=include_inactive,
         limit=limit,
+        offset=offset,
     )
     return [_to_user_response(service, user) for user in users]
 

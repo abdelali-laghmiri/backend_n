@@ -152,6 +152,8 @@ def list_nfc_cards(
     card_status: str | None = Query(default=None, alias="status"),
     include_inactive: bool = Query(default=False),
     valid_for_date: date | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: AttendanceService = Depends(get_attendance_service),
     _current_user: User = Depends(
         require_any_permission(
@@ -169,6 +171,8 @@ def list_nfc_cards(
             status=None if normalized_status is None else service_module_card_status(normalized_status),
             include_inactive=include_inactive,
             valid_for_date=valid_for_date,
+            limit=limit,
+            offset=offset,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -192,6 +196,8 @@ def list_daily_summaries(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: AttendanceService = Depends(get_attendance_service),
     _current_user: User = Depends(require_permission("attendance.read")),
 ) -> list[AttendanceDailySummaryResponse]:
@@ -203,6 +209,8 @@ def list_daily_summaries(
             date_from=date_from,
             date_to=date_to,
             include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
         )
     except AttendanceValidationError as exc:
         raise_attendance_http_error(exc)
@@ -275,6 +283,8 @@ def list_monthly_reports(
     year: int | None = Query(default=None, ge=2000, le=9999),
     month: int | None = Query(default=None, ge=1, le=12),
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: AttendanceService = Depends(get_attendance_service),
     _current_user: User = Depends(require_permission("attendance.read")),
 ) -> list[AttendanceMonthlyReportResponse]:
@@ -283,6 +293,8 @@ def list_monthly_reports(
         year=year,
         month=month,
         include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
     )
     return service.build_monthly_report_responses(reports)
 

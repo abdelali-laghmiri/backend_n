@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import MetaData, create_engine, event
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -39,8 +42,24 @@ def get_engine_options(database_url: str, *, echo: bool = False) -> dict[str, An
     else:
         engine_options["connect_args"] = {"prepare_threshold": None}
         engine_options["pool_pre_ping"] = True
+        engine_options["pool_size"] = settings.db_pool_size
+        engine_options["max_overflow"] = settings.db_max_overflow
+        engine_options["pool_timeout"] = settings.db_pool_timeout
+        engine_options["pool_recycle"] = settings.db_pool_recycle
 
     return engine_options
+
+
+def _log_pool_connect(dbapi_connection, connection_record) -> None:
+    logger.debug("Database pool connection established")
+
+
+def _log_pool_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
+    logger.debug("Database pool connection checked out")
+
+
+def _log_pool_checkin(dbapi_connection, connection_record) -> None:
+    logger.debug("Database pool connection returned")
 
 
 def create_db_engine(
@@ -52,10 +71,24 @@ def create_db_engine(
 
     resolved_database_url = database_url or settings.get_database_url()
     resolved_echo = settings.db_echo if echo is None else echo
-    return create_engine(
+    engine = create_engine(
         resolved_database_url,
         **get_engine_options(resolved_database_url, echo=resolved_echo),
     )
+
+    if not is_sqlite_database(resolved_database_url):
+        logger.info(
+            "Database engine created: %s (pool_size=%s, max_overflow=%s, pool_recycle=%ss)",
+            make_url(resolved_database_url).get_backend_name(),
+            settings.db_pool_size,
+            settings.db_max_overflow,
+            settings.db_pool_recycle,
+        )
+        event.listen(engine, "connect", _log_pool_connect)
+        event.listen(engine, "checkout", _log_pool_checkout)
+        event.listen(engine, "checkin", _log_pool_checkin)
+
+    return engine
 
 
 def create_session_factory(bind: Engine | None = None) -> sessionmaker[Session]:

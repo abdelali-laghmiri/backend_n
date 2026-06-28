@@ -46,6 +46,7 @@ class EmployeeCreateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     image: str | None = Field(default=None, max_length=500)
     hire_date: date
+    gender: Literal["MALE", "FEMALE"] | None = Field(default=None)
     contract_type: Literal["INTERNAL", "EXTERNAL"] = Field(default="INTERNAL")
     external_company_name: str | None = Field(default=None, max_length=255)
     available_leave_balance_days: int = Field(default=0, ge=0)
@@ -96,6 +97,7 @@ class EmployeeUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     image: str | None = Field(default=None, max_length=500)
     hire_date: date | None = None
+    gender: Literal["MALE", "FEMALE"] | None = Field(default=None)
     contract_type: Literal["INTERNAL", "EXTERNAL"] | None = None
     external_company_name: str | None = Field(default=None, max_length=255)
     available_leave_balance_days: int | None = Field(default=None, ge=0)
@@ -158,6 +160,7 @@ class EmployeeResponse(BaseModel):
     phone: str | None
     image: str | None
     hire_date: date
+    gender: str | None
     contract_type: str
     external_company_name: str | None
     available_leave_balance_days: int

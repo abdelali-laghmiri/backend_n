@@ -23,6 +23,7 @@ class DashboardAttendanceOverviewResponse(BaseModel):
     incomplete_count: int
     leave_count: int
     absent_count: int
+    attendance_rate: float
 
 
 class DashboardPerformanceOverviewResponse(BaseModel):
@@ -77,6 +78,13 @@ class DashboardRecentRequestResponse(BaseModel):
     submitted_at: datetime
 
 
+class DashboardRequestTrendPointResponse(BaseModel):
+    """Daily request count for sparkline/trend data."""
+
+    trend_date: date
+    request_count: int
+
+
 class DashboardRequestsSummaryResponse(BaseModel):
     """Requests dashboard summary response."""
 
@@ -84,6 +92,7 @@ class DashboardRequestsSummaryResponse(BaseModel):
     status_counts: list[DashboardRequestsStatusCountResponse]
     requests_by_type: list[DashboardRequestsTypeCountResponse]
     recent_requests: list[DashboardRecentRequestResponse]
+    request_trend: list[DashboardRequestTrendPointResponse]
 
 
 class DashboardAttendanceDayPointResponse(BaseModel):
@@ -94,6 +103,7 @@ class DashboardAttendanceDayPointResponse(BaseModel):
     incomplete_count: int
     leave_count: int
     absent_count: int
+    attendance_rate: float
 
 
 class DashboardAttendanceTotalsResponse(BaseModel):
@@ -103,6 +113,7 @@ class DashboardAttendanceTotalsResponse(BaseModel):
     total_incomplete: int
     total_leave: int
     total_absent: int
+    attendance_rate: float
 
 
 class DashboardAttendanceSummaryResponse(BaseModel):
@@ -111,6 +122,26 @@ class DashboardAttendanceSummaryResponse(BaseModel):
     today: DashboardAttendanceOverviewResponse
     daily_stats: list[DashboardAttendanceDayPointResponse]
     totals: DashboardAttendanceTotalsResponse
+
+
+class DashboardRecentAttendanceResponse(BaseModel):
+    """Recent attendance item included in the clean attendance dashboard response."""
+
+    attendance_id: int
+    employee_id: int
+    employee_matricule: str
+    employee_name: str
+    attendance_date: date
+    status: str
+    first_check_in_at: datetime | None
+    last_check_out_at: datetime | None
+    worked_duration_minutes: int | None
+
+
+class AttendanceDashboardResponse(DashboardAttendanceSummaryResponse):
+    """Clean attendance dashboard response with recent activity."""
+
+    recent_activity: list[DashboardRecentAttendanceResponse]
 
 
 class DashboardTeamPerformanceResponse(BaseModel):
@@ -156,6 +187,29 @@ class DashboardEmployeesByTeamResponse(BaseModel):
     employee_count: int
 
 
+class DashboardEmployeesByGenderResponse(BaseModel):
+    """Employee count grouped by gender."""
+
+    gender: str
+    employee_count: int
+
+
+class DashboardEmployeesByContractTypeResponse(BaseModel):
+    """Employee count grouped by contract type."""
+
+    contract_type: str
+    employee_count: int
+
+
+class DashboardEmployeesByJobTitleResponse(BaseModel):
+    """Employee count grouped by job title."""
+
+    job_title_id: int
+    job_title_code: str
+    job_title_name: str
+    employee_count: int
+
+
 class DashboardEmployeesSummaryResponse(BaseModel):
     """Employees dashboard summary response."""
 
@@ -164,3 +218,30 @@ class DashboardEmployeesSummaryResponse(BaseModel):
     inactive_employees: int
     employees_by_department: list[DashboardEmployeesByDepartmentResponse]
     employees_by_team: list[DashboardEmployeesByTeamResponse]
+    employees_by_gender: list[DashboardEmployeesByGenderResponse]
+    employees_by_contract_type: list[DashboardEmployeesByContractTypeResponse]
+    employees_by_job_title: list[DashboardEmployeesByJobTitleResponse]
+
+
+class EmployeeStatsResponse(DashboardEmployeesSummaryResponse):
+    """Clean employee dashboard stats response."""
+
+
+class CompanyStatsResponse(BaseModel):
+    """Company-wide dashboard statistics response."""
+
+    total_employees: int
+    active_employees: int
+    inactive_employees: int
+    total_departments: int
+    active_departments: int
+    total_teams: int
+    active_teams: int
+    total_job_titles: int
+    active_job_titles: int
+    pending_requests_count: int
+    present_today: int
+    absent_today: int
+    incomplete_count: int
+    on_leave_today: int
+    attendance_rate_today: float

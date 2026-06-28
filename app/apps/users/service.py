@@ -36,9 +36,10 @@ class UsersService:
         *,
         q: str | None,
         include_inactive: bool,
-        limit: int,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[User]:
-        """List users with optional search and active-state filtering."""
+        """List users with optional search, active-state filtering, and pagination."""
 
         statement: Select[tuple[User]] = select(User)
         if not include_inactive:
@@ -55,7 +56,7 @@ class UsersService:
                 )
             )
 
-        statement = statement.order_by(User.created_at.desc(), User.id.desc()).limit(limit)
+        statement = statement.order_by(User.created_at.desc(), User.id.desc()).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_user(self, user_id: int) -> User:

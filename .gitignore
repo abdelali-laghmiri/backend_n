@@ -59,3 +59,7 @@ docs/frontend/node_modules/
 docs/frontend/.next/
 docs/frontend/build/
 docs/frontend/dist/
+
+# Frontend dependencies
+portfolio/node_modules/
+portfolio/dist/

@@ -9,24 +9,32 @@ from sqlalchemy.orm import Session, aliased
 
 from app.apps.attendance.models import AttendanceDailySummary, AttendanceStatusEnum
 from app.apps.dashboard.schemas import (
+    AttendanceDashboardResponse,
+    CompanyStatsResponse,
     DashboardAttendanceDayPointResponse,
     DashboardAttendanceOverviewResponse,
     DashboardAttendanceSummaryResponse,
     DashboardAttendanceTotalsResponse,
+    DashboardEmployeesByContractTypeResponse,
     DashboardEmployeesByDepartmentResponse,
+    DashboardEmployeesByGenderResponse,
+    DashboardEmployeesByJobTitleResponse,
     DashboardEmployeesByTeamResponse,
     DashboardEmployeesSummaryResponse,
     DashboardOverviewResponse,
     DashboardPerformanceOverviewResponse,
     DashboardPerformanceSummaryResponse,
+    DashboardRequestTrendPointResponse,
     DashboardRequestsStatusCountResponse,
     DashboardRequestsSummaryResponse,
     DashboardRequestsTypeCountResponse,
+    DashboardRecentAttendanceResponse,
     DashboardRecentRequestResponse,
     DashboardTeamPerformanceResponse,
+    EmployeeStatsResponse,
 )
 from app.apps.employees.models import Employee
-from app.apps.organization.models import Department, Team
+from app.apps.organization.models import Department, JobTitle, Team
 from app.apps.permissions.service import PermissionsService
 from app.apps.performance.models import TeamDailyPerformance
 from app.apps.requests.models import RequestStatusEnum, RequestType, WorkflowRequest
@@ -121,6 +129,9 @@ class DashboardService:
             team_id=team_id,
             department_id=department_id,
         )
+        resolved_target_date = self._today()
+        resolved_date_to = date_to or resolved_target_date
+        resolved_date_from = date_from or (resolved_date_to - timedelta(days=6))
         requester_employee = aliased(Employee)
         query_conditions = self._build_employee_query_conditions(scope, requester_employee)
         visibility_condition = self._build_request_visibility_condition(
@@ -196,6 +207,13 @@ class DashboardService:
             ).all()
         )
 
+        request_trend = self._get_request_trend(
+            scope,
+            current_user,
+            date_from=resolved_date_from,
+            date_to=resolved_date_to,
+        )
+
         return DashboardRequestsSummaryResponse(
             total_requests=sum(status_counts.values()),
             status_counts=[
@@ -235,6 +253,7 @@ class DashboardService:
                 )
                 for row in recent_rows
             ],
+            request_trend=request_trend,
         )
 
     def get_attendance_summary(
@@ -265,14 +284,62 @@ class DashboardService:
             date_to=resolved_date_to,
         )
 
+        total_present = sum(point.present_count for point in daily_points)
+        total_incomplete = sum(point.incomplete_count for point in daily_points)
+        total_leave = sum(point.leave_count for point in daily_points)
+        total_absent = sum(point.absent_count for point in daily_points)
+        total_all = total_present + total_incomplete + total_leave + total_absent
+        totals_rate = round(
+            total_present / max(total_all, 1) * 100,
+            1,
+        )
+
         return DashboardAttendanceSummaryResponse(
             today=self._build_attendance_overview(scope, resolved_target_date),
             daily_stats=daily_points,
             totals=DashboardAttendanceTotalsResponse(
-                total_present=sum(point.present_count for point in daily_points),
-                total_incomplete=sum(point.incomplete_count for point in daily_points),
-                total_leave=sum(point.leave_count for point in daily_points),
-                total_absent=sum(point.absent_count for point in daily_points),
+                total_present=total_present,
+                total_incomplete=total_incomplete,
+                total_leave=total_leave,
+                total_absent=total_absent,
+                attendance_rate=totals_rate,
+            ),
+        )
+
+    def get_attendance_dashboard(
+        self,
+        current_user: User,
+        *,
+        target_date: date | None,
+        date_from: date | None,
+        date_to: date | None,
+        team_id: int | None,
+        department_id: int | None,
+        recent_limit: int,
+    ) -> AttendanceDashboardResponse:
+        """Return the clean attendance dashboard response with recent activity."""
+
+        summary = self.get_attendance_summary(
+            current_user,
+            target_date=target_date,
+            date_from=date_from,
+            date_to=date_to,
+            team_id=team_id,
+            department_id=department_id,
+        )
+        scope = self._build_scope(
+            current_user,
+            team_id=team_id,
+            department_id=department_id,
+        )
+
+        return AttendanceDashboardResponse(
+            today=summary.today,
+            daily_stats=summary.daily_stats,
+            totals=summary.totals,
+            recent_activity=self._get_recent_attendance_activity(
+                scope,
+                recent_limit=recent_limit,
             ),
         )
 
@@ -402,6 +469,51 @@ class DashboardService:
             ).all()
         )
 
+        gender_rows = list(
+            self.db.execute(
+                select(
+                    Employee.gender,
+                    func.count(Employee.id),
+                )
+                .select_from(Employee)
+                .where(
+                    Employee.gender.isnot(None),
+                    *employee_conditions,
+                )
+                .group_by(Employee.gender)
+                .order_by(Employee.gender.asc())
+            ).all()
+        )
+
+        contract_type_rows = list(
+            self.db.execute(
+                select(
+                    Employee.contract_type,
+                    func.count(Employee.id),
+                )
+                .select_from(Employee)
+                .where(*employee_conditions)
+                .group_by(Employee.contract_type)
+                .order_by(Employee.contract_type.asc())
+            ).all()
+        )
+
+        job_title_rows = list(
+            self.db.execute(
+                select(
+                    JobTitle.id,
+                    JobTitle.code,
+                    JobTitle.name,
+                    func.count(Employee.id),
+                )
+                .select_from(Employee)
+                .join(JobTitle, JobTitle.id == Employee.job_title_id)
+                .where(*employee_conditions)
+                .group_by(JobTitle.id, JobTitle.code, JobTitle.name)
+                .order_by(func.count(Employee.id).desc(), JobTitle.name.asc())
+            ).all()
+        )
+
         return DashboardEmployeesSummaryResponse(
             total_employees=employee_counts["total"],
             active_employees=employee_counts["active"],
@@ -426,6 +538,89 @@ class DashboardService:
                 )
                 for row in team_rows
             ],
+            employees_by_gender=[
+                DashboardEmployeesByGenderResponse(
+                    gender=row[0],
+                    employee_count=int(row[1]),
+                )
+                for row in gender_rows
+            ],
+            employees_by_contract_type=[
+                DashboardEmployeesByContractTypeResponse(
+                    contract_type=row[0],
+                    employee_count=int(row[1]),
+                )
+                for row in contract_type_rows
+            ],
+            employees_by_job_title=[
+                DashboardEmployeesByJobTitleResponse(
+                    job_title_id=row[0],
+                    job_title_code=row[1],
+                    job_title_name=row[2],
+                    employee_count=int(row[3]),
+                )
+                for row in job_title_rows
+            ],
+        )
+
+    def get_employee_stats(
+        self,
+        current_user: User,
+        *,
+        team_id: int | None,
+        department_id: int | None,
+    ) -> EmployeeStatsResponse:
+        """Return the clean employee dashboard stats response."""
+
+        summary = self.get_employees_summary(
+            current_user,
+            team_id=team_id,
+            department_id=department_id,
+        )
+        return EmployeeStatsResponse(**summary.model_dump())
+
+    def get_company_stats(
+        self,
+        current_user: User,
+        *,
+        target_date: date | None,
+        team_id: int | None,
+        department_id: int | None,
+    ) -> CompanyStatsResponse:
+        """Return company-wide stats for dashboard cards."""
+
+        resolved_date = target_date or self._today()
+        scope = self._build_scope(
+            current_user,
+            team_id=team_id,
+            department_id=department_id,
+        )
+        employee_counts = self._get_employee_counts(scope)
+        attendance = self._build_attendance_overview(scope, resolved_date)
+        request_status_counts = self._get_request_status_counts(
+            current_user,
+            scope,
+            date_from=None,
+            date_to=None,
+        )
+        organization_counts = self._get_organization_counts(scope)
+
+        return CompanyStatsResponse(
+            total_employees=employee_counts["total"],
+            active_employees=employee_counts["active"],
+            inactive_employees=employee_counts["inactive"],
+            total_departments=organization_counts["total_departments"],
+            active_departments=organization_counts["active_departments"],
+            total_teams=organization_counts["total_teams"],
+            active_teams=organization_counts["active_teams"],
+            total_job_titles=organization_counts["total_job_titles"],
+            active_job_titles=organization_counts["active_job_titles"],
+            pending_requests_count=request_status_counts[RequestStatusEnum.IN_PROGRESS.value],
+            present_today=attendance.present_count,
+            absent_today=attendance.absent_count,
+            incomplete_count=attendance.incomplete_count,
+            on_leave_today=attendance.leave_count,
+            attendance_rate_today=attendance.attendance_rate,
         )
 
     def _build_scope(
@@ -510,6 +705,10 @@ class DashboardService:
             total_active_employees - present_count - incomplete_count - leave_count,
             0,
         )
+        attendance_rate = round(
+            present_count / max(total_active_employees, 1) * 100,
+            1,
+        )
         return DashboardAttendanceOverviewResponse(
             attendance_date=target_date,
             total_active_employees=total_active_employees,
@@ -517,6 +716,7 @@ class DashboardService:
             incomplete_count=incomplete_count,
             leave_count=leave_count,
             absent_count=absent_count,
+            attendance_rate=attendance_rate,
         )
 
     def _build_attendance_daily_points(
@@ -546,6 +746,10 @@ class DashboardService:
                 total_active_employees - present_count - incomplete_count - leave_count,
                 0,
             )
+            attendance_rate = round(
+                present_count / max(total_active_employees, 1) * 100,
+                1,
+            )
             points.append(
                 DashboardAttendanceDayPointResponse(
                     attendance_date=current_date,
@@ -553,6 +757,7 @@ class DashboardService:
                     incomplete_count=incomplete_count,
                     leave_count=leave_count,
                     absent_count=absent_count,
+                    attendance_rate=attendance_rate,
                 )
             )
             current_date += timedelta(days=1)
@@ -712,6 +917,94 @@ class DashboardService:
 
         return len(visible_team_ids)
 
+    def _get_organization_counts(self, scope: DashboardScope) -> dict[str, int]:
+        """Return organization counts for the visible dashboard scope."""
+
+        department_conditions: list[Any] = []
+        if scope.has_full_access:
+            if scope.requested_department_id is not None:
+                department_conditions.append(Department.id == scope.requested_department_id)
+            elif scope.requested_team_id is not None:
+                team = self._get_team(scope.requested_team_id)
+                department_conditions.append(Department.id == team.department_id)
+        else:
+            visible_department_ids = set(scope.led_department_ids)
+            if scope.own_department_id is not None:
+                visible_department_ids.add(scope.own_department_id)
+
+            if scope.requested_department_id is not None:
+                visible_department_ids = {
+                    department_id
+                    for department_id in visible_department_ids
+                    if department_id == scope.requested_department_id
+                }
+            elif scope.requested_team_id is not None:
+                team = self._get_team(scope.requested_team_id)
+                visible_department_ids = {
+                    department_id
+                    for department_id in visible_department_ids
+                    if department_id == team.department_id
+                }
+
+            if not visible_department_ids:
+                department_conditions.append(false())
+            else:
+                department_conditions.append(Department.id.in_(visible_department_ids))
+
+        team_conditions = self._build_team_query_conditions(scope, Team)
+        if not scope.has_full_access:
+            visible_team_ids = set(scope.led_team_ids)
+            if scope.own_team_id is not None:
+                visible_team_ids.add(scope.own_team_id)
+            if scope.requested_team_id is not None:
+                visible_team_ids = {
+                    team_id for team_id in visible_team_ids if team_id == scope.requested_team_id
+                }
+            if scope.requested_department_id is not None:
+                visible_team_ids = {
+                    team_id
+                    for team_id in visible_team_ids
+                    if self._get_team(team_id).department_id == scope.requested_department_id
+                }
+            team_conditions.append(Team.id.in_(visible_team_ids) if visible_team_ids else false())
+
+        job_title_conditions = self._build_employee_scope_conditions(scope, Employee)
+
+        department_row = self.db.execute(
+            select(
+                func.count(Department.id),
+                func.coalesce(func.sum(case((Department.is_active.is_(True), 1), else_=0)), 0),
+            )
+            .select_from(Department)
+            .where(*department_conditions)
+        ).one()
+        team_row = self.db.execute(
+            select(
+                func.count(Team.id),
+                func.coalesce(func.sum(case((Team.is_active.is_(True), 1), else_=0)), 0),
+            )
+            .select_from(Team)
+            .where(*team_conditions)
+        ).one()
+        job_title_row = self.db.execute(
+            select(
+                func.count(func.distinct(JobTitle.id)),
+                func.count(func.distinct(case((JobTitle.is_active.is_(True), JobTitle.id)))),
+            )
+            .select_from(Employee)
+            .join(JobTitle, JobTitle.id == Employee.job_title_id)
+            .where(*job_title_conditions)
+        ).one()
+
+        return {
+            "total_departments": int(department_row[0] or 0),
+            "active_departments": int(department_row[1] or 0),
+            "total_teams": int(team_row[0] or 0),
+            "active_teams": int(team_row[1] or 0),
+            "total_job_titles": int(job_title_row[0] or 0),
+            "active_job_titles": int(job_title_row[1] or 0),
+        }
+
     def _get_request_status_counts(
         self,
         current_user: User,
@@ -793,6 +1086,112 @@ class DashboardService:
             counts_by_date.setdefault(attendance_date, {})[str(status)] = int(count)
 
         return counts_by_date
+
+    def _get_recent_attendance_activity(
+        self,
+        scope: DashboardScope,
+        *,
+        recent_limit: int,
+    ) -> list[DashboardRecentAttendanceResponse]:
+        """Return recent attendance records with employee data in one query."""
+
+        rows = list(
+            self.db.execute(
+                select(
+                    AttendanceDailySummary.id,
+                    Employee.id,
+                    Employee.matricule,
+                    Employee.first_name,
+                    Employee.last_name,
+                    AttendanceDailySummary.attendance_date,
+                    AttendanceDailySummary.status,
+                    AttendanceDailySummary.first_check_in_at,
+                    AttendanceDailySummary.last_check_out_at,
+                    AttendanceDailySummary.worked_duration_minutes,
+                )
+                .select_from(AttendanceDailySummary)
+                .join(Employee, Employee.id == AttendanceDailySummary.employee_id)
+                .where(*self._build_employee_scope_conditions(scope, Employee))
+                .order_by(
+                    AttendanceDailySummary.attendance_date.desc(),
+                    AttendanceDailySummary.updated_at.desc(),
+                    AttendanceDailySummary.id.desc(),
+                )
+                .limit(recent_limit)
+            ).all()
+        )
+
+        return [
+            DashboardRecentAttendanceResponse(
+                attendance_id=row[0],
+                employee_id=row[1],
+                employee_matricule=row[2],
+                employee_name=f"{row[3]} {row[4]}",
+                attendance_date=row[5],
+                status=row[6],
+                first_check_in_at=row[7],
+                last_check_out_at=row[8],
+                worked_duration_minutes=row[9],
+            )
+            for row in rows
+        ]
+
+    def _get_request_trend(
+        self,
+        scope: DashboardScope,
+        current_user: User,
+        *,
+        date_from: date,
+        date_to: date,
+    ) -> list[DashboardRequestTrendPointResponse]:
+        """Return daily request counts for a date range (trend/sparkline data)."""
+
+        requester_employee = aliased(Employee)
+        query_conditions = self._build_employee_query_conditions(scope, requester_employee)
+        visibility_condition = self._build_request_visibility_condition(
+            scope,
+            current_user,
+            requester_employee,
+        )
+
+        rows = list(
+            self.db.execute(
+                select(
+                    func.date(WorkflowRequest.submitted_at),
+                    func.count(WorkflowRequest.id),
+                )
+                .select_from(WorkflowRequest)
+                .join(
+                    requester_employee,
+                    requester_employee.id == WorkflowRequest.requester_employee_id,
+                )
+                .where(
+                    visibility_condition,
+                    *query_conditions,
+                    func.date(WorkflowRequest.submitted_at) >= date_from,
+                    func.date(WorkflowRequest.submitted_at) <= date_to,
+                )
+                .group_by(func.date(WorkflowRequest.submitted_at))
+                .order_by(func.date(WorkflowRequest.submitted_at).asc())
+            ).all()
+        )
+
+        counts_by_date: dict[date, int] = {}
+        for row_date, count in rows:
+            counts_by_date[row_date] = int(count)
+
+        trend: list[DashboardRequestTrendPointResponse] = []
+        current = date_from
+        while current <= date_to:
+            trend.append(
+                DashboardRequestTrendPointResponse(
+                    trend_date=current,
+                    request_count=counts_by_date.get(current, 0),
+                )
+            )
+            current += timedelta(days=1)
+
+        return trend
 
     def _build_employee_scope_conditions(
         self,

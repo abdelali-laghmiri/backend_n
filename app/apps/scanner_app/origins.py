@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 
 from app.apps.scanner_app.models import AllowedOrigin
+
+logger = logging.getLogger(__name__)
 from app.core.config import Settings
 from app.core.database import create_session_factory, engine
 
@@ -36,6 +40,10 @@ def get_merged_browser_origins(settings: Settings) -> list[str]:
             for origin in rows:
                 add_origin(origin)
         except Exception:
+            logger.warning(
+                "Failed to load allowed_origins from database (table may not exist yet)",
+                exc_info=True,
+            )
             return merged
 
     return merged

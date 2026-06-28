@@ -19,6 +19,14 @@ class HealthResponse(BaseModel):
     )
 
 
+class HealthDetailedResponse(HealthResponse):
+    """Detailed health response with connectivity and environment info."""
+
+    database: str
+    environment: str
+    version: str
+
+
 class ModuleStatusResponse(BaseModel):
     """Base response schema for module placeholder endpoints."""
 

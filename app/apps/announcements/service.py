@@ -61,7 +61,8 @@ class AnnouncementsService:
         current_user: User,
         *,
         include_all: bool = False,
-        limit: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Announcement]:
         """List announcements for either the public feed or the management view."""
 
@@ -74,10 +75,7 @@ class AnnouncementsService:
             self._announcement_type_priority(),
             Announcement.published_at.desc(),
             Announcement.id.desc(),
-        )
-
-        if limit is not None:
-            statement = statement.limit(limit)
+        ).limit(limit).offset(offset)
 
         announcements = list(self.db.execute(statement).scalars().all())
         return announcements

@@ -76,14 +76,18 @@ class ForgotBadgeService:
     def list_own_requests(
         self,
         current_user: User,
+        *,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ForgotBadgeRequest]:
-        """List forgot badge requests for the current user."""
+        """List forgot badge requests for the current user with pagination."""
 
         employee = self._get_employee_for_user(current_user.id)
         statement = (
             select(ForgotBadgeRequest)
             .where(ForgotBadgeRequest.employee_id == employee.id)
             .order_by(ForgotBadgeRequest.requested_at.desc())
+            .limit(limit).offset(offset)
         )
         return list(self.db.execute(statement).scalars().all())
 
@@ -93,8 +97,11 @@ class ForgotBadgeService:
         status: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ForgotBadgeRequest]:
-        """List all forgot badge requests with optional filters."""
+        """List all forgot badge requests with optional filters and pagination."""
 
         statement: Select[tuple[ForgotBadgeRequest]] = select(ForgotBadgeRequest)
         if employee_id is not None:
@@ -109,7 +116,7 @@ class ForgotBadgeService:
         if date_to is not None:
             statement = statement.where(ForgotBadgeRequest.requested_at <= date_to)
 
-        statement = statement.order_by(ForgotBadgeRequest.requested_at.desc())
+        statement = statement.order_by(ForgotBadgeRequest.requested_at.desc()).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_request(self, request_id: int) -> ForgotBadgeRequest:

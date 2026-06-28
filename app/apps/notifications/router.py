@@ -49,7 +49,8 @@ def raise_notifications_http_error(exc: Exception) -> None:
 )
 def list_my_notifications(
     unread_only: bool = Query(default=False),
-    limit: int | None = Query(default=None, ge=1, le=200),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: NotificationsService = Depends(get_notifications_service),
     current_user: User = Depends(get_current_active_user),
 ) -> list[NotificationResponse]:
@@ -57,6 +58,7 @@ def list_my_notifications(
         current_user,
         unread_only=unread_only,
         limit=limit,
+        offset=offset,
     )
     return [service.build_notification_response(item) for item in notifications]
 

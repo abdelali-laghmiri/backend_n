@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -9,6 +11,8 @@ from app.apps.users.models import User
 from app.core.config import Settings
 from app.core.dependencies import get_app_settings, get_db_session
 from app.core.security import TokenValidationError, bearer_scheme, get_bearer_token
+
+logger = logging.getLogger(__name__)
 
 
 def get_auth_service(
@@ -28,6 +32,7 @@ def get_current_user(
 
     token = get_bearer_token(credentials)
     if token is None:
+        logger.warning("Authentication rejected: no bearer token provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials were not provided.",
@@ -37,6 +42,7 @@ def get_current_user(
     try:
         return auth_service.get_authenticated_user_from_token(token)
     except TokenValidationError as exc:
+        logger.warning("Authentication rejected: token validation failed (%s)", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate authentication credentials.",

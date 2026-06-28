@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.core.rate_limit import rate_limit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -64,6 +66,7 @@ def build_authenticated_user_response(
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
     summary="Authenticate a user and issue a JWT access token",
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 def login(
     payload: LoginRequest,
@@ -112,6 +115,7 @@ def login(
     response_model=RefreshTokenResponse,
     status_code=status.HTTP_200_OK,
     summary="Rotate a refresh token and issue a fresh access token",
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 def refresh_access_token(
     payload: RefreshTokenRequest,
@@ -160,6 +164,7 @@ def read_current_user(
     response_model=ChangePasswordResponse,
     status_code=status.HTTP_200_OK,
     summary="Change the current authenticated user's password",
+    dependencies=[Depends(rate_limit(5, 60))],
 )
 def change_password(
     payload: ChangePasswordRequest,

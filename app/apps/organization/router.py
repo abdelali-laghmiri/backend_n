@@ -16,7 +16,7 @@ from app.apps.organization.schemas import (
     TeamResponse,
     TeamUpdateRequest,
 )
-from app.apps.permissions.dependencies import require_permission
+from app.apps.permissions.dependencies import require_any_permission, require_permission
 from app.apps.organization.service import (
     OrganizationConflictError,
     OrganizationNotFoundError,
@@ -94,7 +94,7 @@ def get_current_user_hierarchy(
 )
 def get_company_hierarchy(
     service: OrganizationService = Depends(get_organization_service),
-    _current_user: User = Depends(require_permission("organization.company_hierarchy")),
+    _current_user: User = Depends(require_any_permission("organization.company_hierarchy", "organization.hierarchy.view")),
 ) -> CompanyHierarchyResponse:
     return CompanyHierarchyResponse.model_validate(service.get_company_hierarchy())
 
@@ -107,10 +107,12 @@ def get_company_hierarchy(
 )
 def list_departments(
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: OrganizationService = Depends(get_organization_service),
     _current_user: User = Depends(require_permission("organization.read")),
 ) -> list[DepartmentResponse]:
-    departments = service.list_departments(include_inactive=include_inactive)
+    departments = service.list_departments(include_inactive=include_inactive, limit=limit, offset=offset)
     return [DepartmentResponse.model_validate(item) for item in departments]
 
 
@@ -203,10 +205,12 @@ def create_team(
 )
 def list_teams(
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: OrganizationService = Depends(get_organization_service),
     _current_user: User = Depends(require_permission("organization.read")),
 ) -> list[TeamResponse]:
-    teams = service.list_teams(include_inactive=include_inactive)
+    teams = service.list_teams(include_inactive=include_inactive, limit=limit, offset=offset)
     return [TeamResponse.model_validate(item) for item in teams]
 
 
@@ -299,10 +303,12 @@ def create_job_title(
 )
 def list_job_titles(
     include_inactive: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records per page"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     service: OrganizationService = Depends(get_organization_service),
     _current_user: User = Depends(require_permission("organization.read")),
 ) -> list[JobTitleResponse]:
-    job_titles = service.list_job_titles(include_inactive=include_inactive)
+    job_titles = service.list_job_titles(include_inactive=include_inactive, limit=limit, offset=offset)
     return [JobTitleResponse.model_validate(item) for item in job_titles]
 
 

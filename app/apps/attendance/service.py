@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from calendar import monthrange
 from datetime import date, datetime, timezone
 
@@ -33,6 +35,8 @@ from app.apps.attendance.schemas import (
 )
 from app.apps.employees.models import Employee
 from app.apps.forgot_badge.service import ForgotBadgeService
+
+logger = logging.getLogger(__name__)
 
 
 class AttendanceConflictError(RuntimeError):
@@ -122,7 +126,11 @@ class AttendanceService:
                         check_in_attendance_id=result[0].id,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to notify forgot-badge check-in for assignment %s",
+                        assignment.id,
+                        exc_info=True,
+                    )
 
         if is_temporary and reader_type == AttendanceReaderTypeEnum.OUT:
             assignment = self._get_active_temporary_assignment_by_card(
@@ -136,7 +144,11 @@ class AttendanceService:
                         check_out_attendance_id=result[0].id,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to notify forgot-badge check-out for assignment %s",
+                        assignment.id,
+                        exc_info=True,
+                    )
 
         return result
 
@@ -204,8 +216,10 @@ class AttendanceService:
         status: NfcCardStatusEnum | None = None,
         include_inactive: bool = False,
         valid_for_date: date | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[NfcCard]:
-        """List NFC cards with optional inventory filters."""
+        """List NFC cards with optional inventory filters and pagination."""
 
         statement: Select[tuple[NfcCard]] = select(NfcCard)
 
@@ -224,6 +238,7 @@ class AttendanceService:
         cards = list(
             self.db.execute(
                 statement.order_by(NfcCard.label.asc(), NfcCard.nfc_uid.asc(), NfcCard.id.asc())
+                .limit(limit).offset(offset)
             )
             .scalars()
             .all()
@@ -292,8 +307,10 @@ class AttendanceService:
         date_from: date | None = None,
         date_to: date | None = None,
         include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[AttendanceDailySummary]:
-        """List daily attendance summaries with optional filters."""
+        """List daily attendance summaries with optional filters and pagination."""
 
         self._validate_date_range(date_from=date_from, date_to=date_to)
         normalized_matricule = (
@@ -327,7 +344,7 @@ class AttendanceService:
             AttendanceDailySummary.attendance_date.desc(),
             AttendanceDailySummary.employee_id.asc(),
             AttendanceDailySummary.id.asc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_employee_daily_summaries(
@@ -439,8 +456,10 @@ class AttendanceService:
         year: int | None = None,
         month: int | None = None,
         include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[AttendanceMonthlyReport]:
-        """List generated monthly attendance reports."""
+        """List generated monthly attendance reports with pagination."""
 
         statement: Select[tuple[AttendanceMonthlyReport]] = (
             select(AttendanceMonthlyReport)
@@ -463,7 +482,7 @@ class AttendanceService:
             AttendanceMonthlyReport.report_month.desc(),
             AttendanceMonthlyReport.employee_id.asc(),
             AttendanceMonthlyReport.id.asc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_monthly_report(
@@ -816,7 +835,11 @@ class AttendanceService:
                 if assignment is not None:
                     return (assignment.id, employee.id, employee.id)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to resolve temporary NFC assignment for card %s",
+                nfc_card_id,
+                exc_info=True,
+            )
 
         return (None, None, None)
 
@@ -839,7 +862,11 @@ class AttendanceService:
                 check_out_attendance_id=check_out_attendance_id or 0,
             )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to finalize temporary NFC assignment %s",
+                assignment_id,
+                exc_info=True,
+            )
 
     def _resolve_temporary_employee(
         self,
@@ -855,6 +882,11 @@ class AttendanceService:
                 valid_for_date=valid_for_date,
             )
         except Exception:
+            logger.warning(
+                "Failed to resolve temporary employee for card %s",
+                nfc_card.id,
+                exc_info=True,
+            )
             return None
 
     def _get_active_temporary_assignment_by_card(

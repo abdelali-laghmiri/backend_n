@@ -7,12 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.apps.auth.dependencies import get_current_active_user
 from app.apps.dashboard.dependencies import get_dashboard_service
 from app.apps.dashboard.schemas import (
+    AttendanceDashboardResponse,
+    CompanyStatsResponse,
     DashboardAttendanceSummaryResponse,
     DashboardEmployeesSummaryResponse,
     DashboardOverviewResponse,
     DashboardPerformanceSummaryResponse,
     DashboardRequestsSummaryResponse,
     DashboardStatusResponse,
+    EmployeeStatsResponse,
 )
 from app.apps.dashboard.service import (
     DashboardAuthorizationError,
@@ -134,6 +137,36 @@ def get_attendance_summary(
 
 
 @router.get(
+    "/attendance",
+    response_model=AttendanceDashboardResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get clean dashboard attendance data",
+)
+def get_attendance_dashboard(
+    target_date: date | None = Query(default=None, alias="date"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    team_id: int | None = Query(default=None, ge=1),
+    department_id: int | None = Query(default=None, ge=1),
+    recent_limit: int = Query(default=10, ge=1, le=50),
+    service: DashboardService = Depends(get_dashboard_service),
+    current_user: User = Depends(require_permission("dashboard.read")),
+) -> AttendanceDashboardResponse:
+    try:
+        return service.get_attendance_dashboard(
+            current_user,
+            target_date=target_date,
+            date_from=date_from,
+            date_to=date_to,
+            team_id=team_id,
+            department_id=department_id,
+            recent_limit=recent_limit,
+        )
+    except (DashboardAuthorizationError, DashboardValidationError) as exc:
+        raise_dashboard_http_error(exc)
+
+
+@router.get(
     "/performance-summary",
     response_model=DashboardPerformanceSummaryResponse,
     status_code=status.HTTP_200_OK,
@@ -172,6 +205,52 @@ def get_employees_summary(
     try:
         return service.get_employees_summary(
             current_user,
+            team_id=team_id,
+            department_id=department_id,
+        )
+    except (DashboardAuthorizationError, DashboardValidationError) as exc:
+        raise_dashboard_http_error(exc)
+
+
+@router.get(
+    "/employees",
+    response_model=EmployeeStatsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get clean dashboard employee stats",
+)
+def get_employee_stats(
+    team_id: int | None = Query(default=None, ge=1),
+    department_id: int | None = Query(default=None, ge=1),
+    service: DashboardService = Depends(get_dashboard_service),
+    current_user: User = Depends(require_permission("dashboard.read")),
+) -> EmployeeStatsResponse:
+    try:
+        return service.get_employee_stats(
+            current_user,
+            team_id=team_id,
+            department_id=department_id,
+        )
+    except (DashboardAuthorizationError, DashboardValidationError) as exc:
+        raise_dashboard_http_error(exc)
+
+
+@router.get(
+    "/company-stats",
+    response_model=CompanyStatsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get company dashboard statistics",
+)
+def get_company_stats(
+    target_date: date | None = Query(default=None, alias="date"),
+    team_id: int | None = Query(default=None, ge=1),
+    department_id: int | None = Query(default=None, ge=1),
+    service: DashboardService = Depends(get_dashboard_service),
+    current_user: User = Depends(require_permission("dashboard.read")),
+) -> CompanyStatsResponse:
+    try:
+        return service.get_company_stats(
+            current_user,
+            target_date=target_date,
             team_id=team_id,
             department_id=department_id,
         )

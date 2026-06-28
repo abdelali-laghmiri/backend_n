@@ -71,6 +71,7 @@ class EmployeesService:
             phone=payload.phone,
             image=payload.image,
             hire_date=payload.hire_date,
+            gender=payload.gender,
             contract_type=payload.contract_type,
             external_company_name=payload.external_company_name,
             available_leave_balance_days=payload.available_leave_balance_days,
@@ -98,8 +99,10 @@ class EmployeesService:
         department_id: int | None = None,
         team_id: int | None = None,
         job_title_id: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Employee]:
-        """List employees with optional basic filters."""
+        """List employees with optional basic filters and pagination."""
 
         statement: Select[tuple[Employee]] = select(Employee)
         if not include_inactive:
@@ -130,7 +133,7 @@ class EmployeesService:
             Employee.last_name.asc(),
             Employee.first_name.asc(),
             Employee.id.asc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_employee(self, employee_id: int) -> Employee:
@@ -161,6 +164,7 @@ class EmployeesService:
         final_phone = changes.get("phone", employee.phone)
         final_image = changes.get("image", employee.image)
         final_hire_date = changes.get("hire_date", employee.hire_date)
+        final_gender = changes.get("gender", employee.gender)
         final_contract_type = changes.get(
             "contract_type", employee.contract_type
         )
@@ -204,6 +208,7 @@ class EmployeesService:
         employee.phone = final_phone
         employee.image = final_image
         employee.hire_date = final_hire_date
+        employee.gender = final_gender
         employee.contract_type = final_contract_type
         employee.external_company_name = final_external_company_name
         employee.available_leave_balance_days = final_available_leave_balance_days

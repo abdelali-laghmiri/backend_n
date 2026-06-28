@@ -112,14 +112,20 @@ class OrganizationService:
             conflict_message="Failed to create the department.",
         )
 
-    def list_departments(self, *, include_inactive: bool = False) -> list[Department]:
-        """List departments."""
+    def list_departments(
+        self,
+        *,
+        include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Department]:
+        """List departments with pagination."""
 
         statement: Select[tuple[Department]] = select(Department)
         if not include_inactive:
             statement = statement.where(Department.is_active.is_(True))
 
-        statement = statement.order_by(Department.name.asc(), Department.id.asc())
+        statement = statement.order_by(Department.name.asc(), Department.id.asc()).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_department(self, department_id: int) -> Department:
@@ -213,14 +219,20 @@ class OrganizationService:
             conflict_message="Failed to create the team.",
         )
 
-    def list_teams(self, *, include_inactive: bool = False) -> list[Team]:
-        """List teams."""
+    def list_teams(
+        self,
+        *,
+        include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Team]:
+        """List teams with pagination."""
 
         statement: Select[tuple[Team]] = select(Team)
         if not include_inactive:
             statement = statement.where(Team.is_active.is_(True))
 
-        statement = statement.order_by(Team.name.asc(), Team.id.asc())
+        statement = statement.order_by(Team.name.asc(), Team.id.asc()).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_team(self, team_id: int) -> Team:
@@ -297,8 +309,14 @@ class OrganizationService:
             conflict_message="Failed to create the job title.",
         )
 
-    def list_job_titles(self, *, include_inactive: bool = False) -> list[JobTitle]:
-        """List job titles."""
+    def list_job_titles(
+        self,
+        *,
+        include_inactive: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[JobTitle]:
+        """List job titles with pagination."""
 
         statement: Select[tuple[JobTitle]] = select(JobTitle)
         if not include_inactive:
@@ -308,7 +326,7 @@ class OrganizationService:
             JobTitle.hierarchical_level.asc(),
             JobTitle.name.asc(),
             JobTitle.id.asc(),
-        )
+        ).limit(limit).offset(offset)
         return list(self.db.execute(statement).scalars().all())
 
     def get_job_title(self, job_title_id: int) -> JobTitle:

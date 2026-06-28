@@ -2,11 +2,15 @@
 Migration API endpoint - run this to apply canonical permissions.
 Access: POST /api/v1/setup/migrate-permissions
 """
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import text
 from app.core.database import get_db
 from app.core.security import require_superadmin
 from app.apps.users.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -52,8 +56,12 @@ async def migrate_permissions(
             """), {"code": code, "name": name, "desc": desc, "module": module})
             if result.rowcount:
                 results["inserted"] += 1
-        except Exception as e:
-            pass
+        except Exception:
+            logger.warning(
+                "Failed to seed permission %s (%s)",
+                code, module,
+                exc_info=True,
+            )
     
     # 2. Update legacy to canonical
     updates = [
@@ -83,8 +91,12 @@ async def migrate_permissions(
                 WHERE code = :old
             """), {"old": old_code, "new": new_code, "name": name})
             results["updated"] += result.rowcount
-        except Exception as e:
-            pass
+        except Exception:
+            logger.warning(
+                "Failed to update permission %s -> %s",
+                old_code, new_code,
+                exc_info=True,
+            )
     
     # 3. Reassign job title permissions
     db.execute(text("DELETE FROM job_title_permissions"))
@@ -134,7 +146,11 @@ async def migrate_permissions(
                         """), {"jt_id": jt[0], "p_id": p[0]})
                         results["assigned"] += 1
                     except Exception:
-                        pass
+                        logger.warning(
+                            "Failed to assign permission %s to job title %s",
+                            p_code, jt_code,
+                            exc_info=True,
+                        )
     
     db.commit()
     results["status"] = "complete"

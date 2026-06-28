@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.core.security import validate_password_complexity
 
 
 class AuthenticatedUserResponse(BaseModel):
@@ -67,8 +69,13 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=255)
     new_password: str = Field(min_length=8, max_length=255)
 
+    @field_validator("new_password")
+    @classmethod
+    def check_password_complexity(cls, value: str) -> str:
+        return validate_password_complexity(value)
+
     @model_validator(mode="after")
-    def validate_new_password(self) -> "ChangePasswordRequest":
+    def check_passwords_differ(self) -> "ChangePasswordRequest":
         """Prevent reusing the current password as the new password."""
 
         if self.current_password == self.new_password:

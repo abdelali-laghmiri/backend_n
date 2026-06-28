@@ -164,7 +164,8 @@ class MessagesService:
         current_user: User,
         *,
         q: str | None = None,
-        limit: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[MessageRecipientCandidateResponse]:
         access_policy = self._get_access_policy(current_user)
         if not access_policy.can_read_users:
@@ -231,9 +232,7 @@ class MessagesService:
             User.first_name.asc(),
             User.last_name.asc(),
             User.matricule.asc(),
-        )
-        if limit is not None:
-            statement = statement.limit(limit)
+        ).limit(limit).offset(offset)
 
         rows = self.db.execute(statement).all()
         candidates: list[MessageRecipientCandidateResponse] = []
@@ -280,7 +279,8 @@ class MessagesService:
         current_user: User,
         *,
         unread_only: bool = False,
-        limit: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[MessageListItemResponse]:
         statement: Select[tuple[Message, MessageRecipient]] = (
             select(Message, MessageRecipient)
@@ -291,10 +291,7 @@ class MessagesService:
             statement = statement.where(MessageRecipient.is_read.is_(False))
 
         statement = statement.order_by(Message.created_at.desc(), Message.id.desc())
-        if limit is not None:
-            statement = statement.limit(limit)
-
-        rows = list(self.db.execute(statement).all())
+        rows = list(self.db.execute(statement.limit(limit).offset(offset)).all())
         if not rows:
             return []
 
@@ -316,16 +313,14 @@ class MessagesService:
         self,
         current_user: User,
         *,
-        limit: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[MessageListItemResponse]:
         statement: Select[tuple[Message]] = select(Message).where(
             Message.sender_user_id == current_user.id
         )
         statement = statement.order_by(Message.created_at.desc(), Message.id.desc())
-        if limit is not None:
-            statement = statement.limit(limit)
-
-        messages = list(self.db.execute(statement).scalars().all())
+        messages = list(self.db.execute(statement.limit(limit).offset(offset)).scalars().all())
         if not messages:
             return []
 
