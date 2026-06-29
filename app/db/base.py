@@ -18,6 +18,7 @@ from app.apps.organization.models import Department, JobTitle, Team  # noqa: F40
 from app.apps.permissions.models import JobTitlePermissionAssignment, Permission  # noqa: F401
 from app.apps.performance.models import TeamDailyPerformance, TeamObjective  # noqa: F401
 from app.apps.scanner_app.models import AllowedOrigin, ScannerAppBuild  # noqa: F401
+from app.apps.tasks.models import EmployeeTask  # noqa: F401
 from app.apps.requests.models import (  # noqa: F401
     RequestActionHistory,
     RequestFieldValue,

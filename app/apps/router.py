@@ -16,6 +16,7 @@ from app.apps.performance.router import router as performance_router
 from app.apps.requests.router import router as requests_router
 from app.apps.scanner_app.router import router as scanner_app_router
 from app.apps.setup.router import router as setup_router
+from app.apps.tasks.router import router as tasks_router
 from app.apps.users.router import router as users_router
 
 api_router = APIRouter()
@@ -35,3 +36,4 @@ api_router.include_router(forgot_badge_router)
 api_router.include_router(performance_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(scanner_app_router)
+api_router.include_router(tasks_router)

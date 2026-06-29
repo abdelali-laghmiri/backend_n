@@ -69,7 +69,7 @@ last_error: Exception | None = None
 for attempt in range(1, retries + 1):
     try:
         print(f"[migrations] Attempt {attempt}/{retries}...")
-        with engine.connect() as connection:
+        with engine.begin() as connection:
             is_postgres = connection.dialect.name == "postgresql"
             if is_postgres:
                 connection.execute(
@@ -107,6 +107,17 @@ if last_error is not None:
 PY
 }
 
+run_seed_sql() {
+  if [ -z "${SEED_SQL_DIR:-}" ]; then
+    echo "Skipping SQL seed because SEED_SQL_DIR is not set."
+    return
+  fi
+
+  echo "Running SQL seed files from ${SEED_SQL_DIR}..."
+  python /app/scripts/run_seed_sql.py
+}
+
 run_migrations
+run_seed_sql
 echo "Starting application: $*"
 exec "$@"

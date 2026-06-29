@@ -336,6 +336,24 @@ CANONICAL_PERMISSIONS = (
         "module": "dashboard",
     },
     {
+        "code": "tasks.view",
+        "name": "View my tasks",
+        "description": "View tasks assigned to the current employee.",
+        "module": "tasks",
+    },
+    {
+        "code": "tasks.complete",
+        "name": "Complete my tasks",
+        "description": "Mark assigned tasks as completed.",
+        "module": "tasks",
+    },
+    {
+        "code": "tasks.manage",
+        "name": "Manage tasks",
+        "description": "Assign and list employee tasks.",
+        "module": "tasks",
+    },
+    {
         "code": "profile.view",
         "name": "View profile",
         "description": "View user profile information.",
@@ -443,6 +461,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "performance.manage",
         "dashboard.view",
         "dashboard.analytics.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
         "forgot_badge.create",
         "forgot_badge.view_own",
@@ -475,6 +496,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "forgot_badge.view_all",
         "forgot_badge.manage",
         "dashboard.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
     ],
     "ATTENDANCE_MANAGER": [
@@ -499,6 +523,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "forgot_badge.manage",
         "dashboard.view",
         "dashboard.analytics.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
     ],
     "FINANCE_PAYROLL": [
@@ -515,6 +542,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "attendance.reports.generate",
         "dashboard.view",
         "dashboard.analytics.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
     ],
     "DEPARTMENT_MANAGER": [
@@ -536,6 +566,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "forgot_badge.view_own",
         "forgot_badge.view_all",
         "dashboard.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
     ],
     "TEAM_LEADER": [
@@ -554,6 +587,9 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "performance.view",
         "forgot_badge.view_own",
         "dashboard.view",
+        "tasks.view",
+        "tasks.complete",
+        "tasks.manage",
         "profile.view",
     ],
     "EMPLOYEE": [
@@ -568,6 +604,8 @@ ROLE_PERMISSION_MATRIX: dict[str, list[str]] = {
         "forgot_badge.create",
         "forgot_badge.view_own",
         "dashboard.view",
+        "tasks.view",
+        "tasks.complete",
         "profile.view",
     ],
 }

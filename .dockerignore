@@ -18,4 +18,5 @@ tests/
 docs/
 .vscode/
 .idea/
+.vercel/
 .git/
